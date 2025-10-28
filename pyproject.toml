@@ -1,0 +1,44 @@
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mini-sisso"
+version = "1.0.0" # または適切なバージョン番号
+description = "A lightweight and user-friendly Python implementation of the SISSO algorithm for symbolic regression, compatible with scikit-learn."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+authors = [
+  { name = "shinkawa shuan", email = "s.shuan16@gmail.com" }, # ★★★ 作者情報を更新 ★★★
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 4 - Beta", # または 5 - Production/Stable など適切な状態を設定
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Framework :: scikit-learn", # scikit-learn互換であることを明記
+]
+
+dependencies = [
+    "numpy>=1.20.0",
+    "scipy>=1.7.0",
+    "scikit-learn>=1.0.0",
+    "pandas>=1.3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/shinkawa-shuan/mini-sisso" # ★★★ GitHub URLを更新 ★★★
+Repository = "https://github.com/shinkawa-shuan/mini-sisso"
+Issues = "https://github.com/shinkawa-shuan/mini-sisso/issues" # イシューページへのリンク
