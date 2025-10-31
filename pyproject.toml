@@ -3,6 +3,10 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# hatchlingに、どのディレクトリをパッケージとして含めるかを教える
+[tool.hatch.build.targets.wheel]
+packages = ["src/mini_sisso"]
+
 [project]
 name = "mini-sisso"
 version = "1.0.0" # または適切なバージョン番号
@@ -13,6 +17,7 @@ license = "MIT"
 authors = [
   { name = "shinkawa shuan", email = "s.shuan16@gmail.com" }, # ★★★ 作者情報を更新 ★★★
 ]
+
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
