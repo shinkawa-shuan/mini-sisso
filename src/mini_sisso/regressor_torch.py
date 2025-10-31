@@ -1,4 +1,4 @@
-# regressor_torch.py (Final fix for tensor shapes)
+# regressor_torch.py (Final version, corrected for dot product shapes)
 import time
 from itertools import combinations
 from typing import Dict, List, Tuple
@@ -90,20 +90,18 @@ class SissoRegressorTorch:
                         best_model_recipe_tuple = batch_combinations[min_idx]
 
                         best_coeffs_std = coeffs_std[min_idx]
-                        best_X_mean = X_mean[min_idx]  # Keep as (1, n_features)
-                        best_X_std = X_std[min_idx]  # Keep as (1, n_features)
+                        best_X_mean = X_mean[min_idx]
+                        best_X_std = X_std[min_idx]
 
                         best_coeffs = best_coeffs_std / best_X_std.squeeze(0)
 
-                        # ★★★ CRITICAL CORRECTION ★★★
-                        # torch.dotは1Dテンソル同士の内積。両方をflatten()で確実に1Dにする。
+                        # ★★★ FINAL CORRECTION ★★★
+                        # Ensure both tensors are 1D before dot product
                         intercept_correction = torch.dot(best_coeffs.flatten(), best_X_mean.flatten())
                         best_intercept = self.y_mean - intercept_correction
-                        # ★★★★★★★★★★★★★★★★★★★★★★★★★
+                        # ★★★★★★★★★★★★★★★★★★★★★★
 
-            except torch.linalg.LinAlgError as e:
-                # デバッグ用にエラーメッセージを表示
-                # print(f"  [DEBUG] LinAlgError: {e}")
+            except torch.linalg.LinAlgError:
                 continue
 
         return best_rmse, best_model_recipe_tuple, best_coeffs, best_intercept
