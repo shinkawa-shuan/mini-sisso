@@ -6,11 +6,11 @@ from typing import Dict, List, Tuple
 import numpy as np
 from scipy.linalg import lstsq as sp_lstsq  # SciPyのlstsqを使用
 
-from .executor import RecipeExecutor
+from .executor_numpy import RecipeExecutor  # インポート元を修正
 from .recipe import FeatureRecipe
 
 
-class SissoRegressor:
+class SissoRegressorNumPy:
     def __init__(self, all_recipes: List[FeatureRecipe], executor: RecipeExecutor, y: np.ndarray, n_term: int, k: int, so_method: str = "exhaustive", alpha: float = 0.01):
         if so_method != "exhaustive":
             raise NotImplementedError("Only 'exhaustive' is supported.")
