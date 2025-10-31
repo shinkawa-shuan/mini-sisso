@@ -1,20 +1,27 @@
-# regressor.py (NumPy/SciPy version)
+# regressor_numpy.py (Corrected __init__ signature)
 import time
 from itertools import combinations
 from typing import Dict, List, Tuple
 
 import numpy as np
-from scipy.linalg import lstsq as sp_lstsq  # SciPyのlstsqを使用
+from scipy.linalg import lstsq as sp_lstsq
 
-from .executor_numpy import RecipeExecutor  # インポート元を修正
+from .executor_numpy import RecipeExecutor
 from .recipe import FeatureRecipe
 
 
 class SissoRegressorNumPy:
-    def __init__(self, all_recipes: List[FeatureRecipe], executor: RecipeExecutor, y: np.ndarray, n_term: int, k: int, so_method: str = "exhaustive", alpha: float = 0.01):
-        if so_method != "exhaustive":
-            raise NotImplementedError("Only 'exhaustive' is supported.")
-        self.all_recipes, self.executor, self.y, self.n_term, self.k = all_recipes, executor, y, n_term, k
+    # ★★★ CRITICAL CORRECTION: Adjust __init__ arguments ★★★
+    def __init__(self, all_recipes: List[FeatureRecipe], executor: RecipeExecutor, y: np.ndarray, n_term: int, k: int, alpha: float):  # so_method is handled by model.py
+
+        # if so_method != 'exhaustive':
+        #     raise NotImplementedError("Only 'exhaustive' is supported.") # ★★★ このチェックを削除 ★★★
+
+        self.all_recipes = all_recipes
+        self.executor = executor
+        self.y = y
+        self.n_term = n_term
+        self.k = k
         self.y_mean, self.y_centered = np.mean(y), y - np.mean(y)
         self.best_models: Dict[int, dict] = {}
 

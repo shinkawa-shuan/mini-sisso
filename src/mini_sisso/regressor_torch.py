@@ -1,4 +1,4 @@
-# regressor_torch.py
+# regressor_torch.py (Corrected __init__ signature)
 import time
 from itertools import combinations
 from typing import Dict, List, Tuple
@@ -11,8 +11,9 @@ from .recipe import FeatureRecipe
 
 
 class SissoRegressorTorch:
-    def __init__(self, all_recipes: List[FeatureRecipe], executor: RecipeExecutorTorch, y: torch.Tensor, n_term: int, k: int, alpha: float = 0.01):
-        # Note: alpha is kept for future lasso implementation but not used here
+    # ★★★ CRITICAL CORRECTION: Adjust __init__ arguments ★★★
+    def __init__(self, all_recipes: List[FeatureRecipe], executor: RecipeExecutorTorch, y: torch.Tensor, n_term: int, k: int, alpha: float):  # so_method is handled by model.py
+
         self.all_recipes = all_recipes
         self.executor = executor
         self.y = y
