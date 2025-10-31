@@ -28,7 +28,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Chemistry",
     "Topic :: Scientific/Engineering :: Physics",
-    "Framework :: scikit-learn", # scikit-learn互換であることを明記
 ]
 
 dependencies = [
