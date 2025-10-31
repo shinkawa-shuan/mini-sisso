@@ -1,4 +1,4 @@
-# regressor_torch.py (Final version, corrected for dot product shapes)
+# regressor_torch.py (Final fix for residual update shape)
 import time
 from itertools import combinations
 from typing import Dict, List, Tuple
@@ -95,11 +95,8 @@ class SissoRegressorTorch:
 
                         best_coeffs = best_coeffs_std / best_X_std.squeeze(0)
 
-                        # ★★★ FINAL CORRECTION ★★★
-                        # Ensure both tensors are 1D before dot product
                         intercept_correction = torch.dot(best_coeffs.flatten(), best_X_mean.flatten())
                         best_intercept = self.y_mean - intercept_correction
-                        # ★★★★★★★★★★★★★★★★★★★★★★
 
             except torch.linalg.LinAlgError:
                 continue
@@ -126,10 +123,15 @@ class SissoRegressorTorch:
 
             if model_recipes:
                 self.best_models[i] = {"rmse": rmse, "recipes": model_recipes, "coeffs": coeffs, "intercept": intercept}
-                y_pred = intercept
+
+                # ★★★ FINAL CORRECTION ★★★
+                # y_predの初期化を、yと同じ形状のテンソルで行う
+                y_pred = torch.full_like(self.y, intercept)
+
                 for j, recipe in enumerate(self.best_models[i]["recipes"]):
                     y_pred += self.best_models[i]["coeffs"].flatten()[j] * torch.nan_to_num(self.executor.execute(recipe))
                 residual = self.y - y_pred
+                # ★★★★★★★★★★★★★★★★★★★★★★
 
                 print(f"Best {i}-term model found. RMSE: {rmse:.6f}")
                 print(f"Equation: {self._format_equation(model_recipes, coeffs, intercept)}")
