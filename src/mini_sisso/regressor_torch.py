@@ -1,4 +1,4 @@
-# regressor_torch.py (Corrected __init__ signature)
+# regressor_torch.py (Final fix for tensor shapes)
 import time
 from itertools import combinations
 from typing import Dict, List, Tuple
@@ -11,30 +11,21 @@ from .recipe import FeatureRecipe
 
 
 class SissoRegressorTorch:
-    # ★★★ CRITICAL CORRECTION: Adjust __init__ arguments ★★★
-    def __init__(self, all_recipes: List[FeatureRecipe], executor: RecipeExecutorTorch, y: torch.Tensor, n_term: int, k: int, alpha: float):  # so_method is handled by model.py
-
-        self.all_recipes = all_recipes
-        self.executor = executor
-        self.y = y
-        self.n_term = n_term
-        self.k = k
+    def __init__(self, all_recipes: List[FeatureRecipe], executor: RecipeExecutorTorch, y: torch.Tensor, n_term: int, k: int, alpha: float):
+        self.all_recipes, self.executor, self.y, self.n_term, self.k = all_recipes, executor, y, n_term, k
         self.device = executor.device
-
-        self.y_mean = y.mean()
-        self.y_centered = y - self.y_mean
-
+        self.y_mean, self.y_centered = y.mean(), y - y.mean()
         self.best_models: Dict[int, dict] = {}
 
     def _format_equation(self, recipes: Tuple[FeatureRecipe, ...], coeffs: torch.Tensor, intercept: torch.Tensor) -> str:
         equation = "".join(f"{c.item():+.6f} * {repr(r)} " for r, c in zip(recipes, coeffs.flatten()))
         return equation + f"{intercept.item():+.6f}"
 
-    def _run_sis(self, target: torch.Tensor, recipes_to_screen: List[FeatureRecipe]) -> List[FeatureRecipe]:
-        if not recipes_to_screen:
+    def _run_sis(self, target: torch.Tensor, recipes: List[FeatureRecipe]) -> List[FeatureRecipe]:
+        if not recipes:
             return []
         scores = []
-        for recipe in recipes_to_screen:
+        for recipe in recipes:
             tensor = self.executor.execute(recipe)
             valid = ~torch.isnan(tensor) & ~torch.isnan(target)
             if valid.sum() < 2:
@@ -46,8 +37,7 @@ class SissoRegressorTorch:
                 scores.append(torch.abs(torch.dot(valid_t - valid_t.mean(), (valid_f - mean) / std)).item())
             else:
                 scores.append(0.0)
-        top_k_indices = np.argsort(scores)[::-1][: self.k]
-        return [recipes_to_screen[i] for i in top_k_indices]
+        return [recipes[i] for i in np.argsort(scores)[::-1][: self.k]]
 
     def _run_so_exhaustive(self, so_candidate_pool: List[FeatureRecipe], n_current_term: int, batch_size: int = 5000) -> Tuple:
         print(f"--- Running SO (GPU) for {n_current_term}-term models. Candidates: {len(so_candidate_pool)} ---")
@@ -56,8 +46,7 @@ class SissoRegressorTorch:
             return float("inf"), None, None, None
         print(f"Total combinations to test: {len(model_combinations)}")
 
-        best_rmse = float("inf")
-        best_model_recipe_tuple, best_coeffs, best_intercept = None, None, None
+        best_rmse, best_model_recipe_tuple, best_coeffs, best_intercept = float("inf"), None, None, None
         n_samples = self.y.shape[0]
 
         for i in range(0, len(model_combinations), batch_size):
@@ -71,7 +60,6 @@ class SissoRegressorTorch:
                 for l, recipe in enumerate(combo):
                     X_batch[j, :, l] = tensor_map[recipe]
 
-            # NaN/inf handling
             for j in range(n_current_term):
                 col = X_batch[..., j]
                 valid_mask = ~torch.isnan(col) & ~torch.isinf(col)
@@ -100,12 +88,22 @@ class SissoRegressorTorch:
                     if rmse < best_rmse:
                         best_rmse = rmse
                         best_model_recipe_tuple = batch_combinations[min_idx]
+
                         best_coeffs_std = coeffs_std[min_idx]
-                        best_X_mean = X_mean[min_idx].squeeze(0)
-                        best_X_std = X_std[min_idx].squeeze(0)
-                        best_coeffs = best_coeffs_std / best_X_std
-                        best_intercept = self.y_mean - torch.dot(best_coeffs, best_X_mean)
-            except torch.linalg.LinAlgError:
+                        best_X_mean = X_mean[min_idx]  # Keep as (1, n_features)
+                        best_X_std = X_std[min_idx]  # Keep as (1, n_features)
+
+                        best_coeffs = best_coeffs_std / best_X_std.squeeze(0)
+
+                        # ★★★ CRITICAL CORRECTION ★★★
+                        # torch.dotは1Dテンソル同士の内積。両方をflatten()で確実に1Dにする。
+                        intercept_correction = torch.dot(best_coeffs.flatten(), best_X_mean.flatten())
+                        best_intercept = self.y_mean - intercept_correction
+                        # ★★★★★★★★★★★★★★★★★★★★★★★★★
+
+            except torch.linalg.LinAlgError as e:
+                # デバッグ用にエラーメッセージを表示
+                # print(f"  [DEBUG] LinAlgError: {e}")
                 continue
 
         return best_rmse, best_model_recipe_tuple, best_coeffs, best_intercept
@@ -132,7 +130,7 @@ class SissoRegressorTorch:
                 self.best_models[i] = {"rmse": rmse, "recipes": model_recipes, "coeffs": coeffs, "intercept": intercept}
                 y_pred = intercept
                 for j, recipe in enumerate(self.best_models[i]["recipes"]):
-                    y_pred += self.best_models[i]["coeffs"][j] * torch.nan_to_num(self.executor.execute(recipe))
+                    y_pred += self.best_models[i]["coeffs"].flatten()[j] * torch.nan_to_num(self.executor.execute(recipe))
                 residual = self.y - y_pred
 
                 print(f"Best {i}-term model found. RMSE: {rmse:.6f}")
