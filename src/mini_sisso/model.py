@@ -96,7 +96,7 @@ from typing import List, Tuple
 
 import numpy as np
 
-# model.py (Final version with dynamic backend switching)
+# model.py (Reflecting changes in feature_generator)
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
 
@@ -104,7 +104,6 @@ from .feature_generator import FeatureGenerator
 from .recipe import OPERATORS, FeatureRecipe
 
 # --- Dynamic Import Setup ---
-# Check for PyTorch availability only once when the module is imported
 try:
     import torch
 
@@ -126,22 +125,15 @@ class MiniSisso(BaseEstimator, RegressorMixin):
         self.alpha = alpha
         self.device = device
 
-        # Raise an error early if GPU is requested but not available
         if self.device == "cuda" and not TORCH_AVAILABLE:
             raise ImportError("GPU support requires PyTorch. Please install with 'pip install \"mini-sisso[gpu]\"'")
 
     def fit(self, X, y):
         start_time = time.time()
 
-        # --- Data Preparation ---
-        X_arr = np.asarray(X)
-        y_arr = np.asarray(y)
+        X_arr, y_arr = np.asarray(X), np.asarray(y)
 
-        if isinstance(X, pd.DataFrame):
-            self.base_feature_names_ = X.columns.tolist()
-        else:
-            self.base_feature_names_ = [f"f{i}" for i in range(X_arr.shape[1])]
-
+        self.base_feature_names_ = X.columns.tolist() if isinstance(X, pd.DataFrame) else [f"f{i}" for i in range(X_arr.shape[1])]
         FeatureRecipe.base_feature_names = self.base_feature_names_
         operators_dict = {op: OPERATORS[op] for op in self.operators + ["base"] if op in OPERATORS} if self.operators else OPERATORS
 
@@ -156,7 +148,7 @@ class MiniSisso(BaseEstimator, RegressorMixin):
 
             ExecutorClass = RecipeExecutorTorch
             RegressorClass = SissoRegressorTorch
-        else:  # device == 'cpu'
+        else:
             print("Using NumPy/SciPy backend for CPU execution.")
             from .executor_numpy import RecipeExecutor as RecipeExecutorNumPy
             from .regressor_numpy import SissoRegressorNumPy
@@ -172,6 +164,7 @@ class MiniSisso(BaseEstimator, RegressorMixin):
         generator = FeatureGenerator(self.base_feature_names_, operators_dict)
 
         if self.use_levelwise_sis:
+            # ★★★ executorとy_fitを引数として渡す ★★★
             recipes = generator.expand_with_levelwise_sis(self.n_expansion, self.k_per_level, executor, y_fit)
         else:
             recipes = generator.expand_full(self.n_expansion)
@@ -181,20 +174,16 @@ class MiniSisso(BaseEstimator, RegressorMixin):
 
         print(f"\n{'='*50}\nSISSO fitting finished. Total time: {time.time() - start_time:.2f}s\n{'='*50}")
 
-        # --- Process Results ---
         if result:
             rmse, eq, r2, all_models = result
             if all_models:
                 best_model = min(all_models.values(), key=lambda m: m["rmse"])
                 self.best_model_recipes_ = best_model["recipes"]
-                # Store coeffs and intercept as NumPy arrays for consistency in predict
                 self.coef_ = best_model["coeffs"].cpu().numpy() if TORCH_AVAILABLE and isinstance(best_model["coeffs"], torch.Tensor) else np.asarray(best_model["coeffs"])
                 self.intercept_ = best_model["intercept"].item() if TORCH_AVAILABLE and isinstance(best_model["intercept"], torch.Tensor) else float(best_model["intercept"])
-
                 self.equation_ = eq
                 self.rmse_ = best_model["rmse"]
                 self.r2_ = r2
-
                 print(f"\nBest Model Found ({len(self.best_model_recipes_)} terms):\n  RMSE: {self.rmse_:.6f}\n  R2:   {self.r2_:.6f}\n  Equation: {self.equation_}")
 
         if not hasattr(self, "coef_"):
@@ -212,7 +201,7 @@ class MiniSisso(BaseEstimator, RegressorMixin):
         X_arr = np.asarray(X)
         FeatureRecipe.base_feature_names = self.base_feature_names_
 
-        # Predict always uses the NumPy backend for simplicity and wider compatibility
+        # Predictは常にNumPyバックエンドを使用
         from .executor_numpy import RecipeExecutor as RecipeExecutorNumPy
 
         pred_executor = RecipeExecutorNumPy(X_arr)
