@@ -130,7 +130,6 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
 
-from .executor import RecipeExecutor
 from .feature_generator import FeatureGenerator
 from .recipe import OPERATORS, FeatureRecipe
 
