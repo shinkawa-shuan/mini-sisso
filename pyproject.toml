@@ -1,23 +1,20 @@
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# hatchlingに、どのディレクトリをパッケージとして含めるかを教える
 [tool.hatch.build.targets.wheel]
 packages = ["src/mini_sisso"]
 
 [project]
 name = "mini-sisso"
-version = "1.0.0" # または適切なバージョン番号
+version = "1.1.0"
 description = "A lightweight and user-friendly Python implementation of the SISSO algorithm for symbolic regression, compatible with scikit-learn."
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
 authors = [
-  { name = "shinkawa shuan", email = "s.shuan16@gmail.com" }, # ★★★ 作者情報を更新 ★★★
+  { name = "shinkawa shuan", email = "s.shuan16@gmail.com" },
 ]
-
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -28,11 +25,9 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Intended Audience :: Science/Research",
-    "Development Status :: 4 - Beta", # または 5 - Production/Stable など適切な状態を設定
+    "Development Status :: 4 - Beta",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Topic :: Scientific/Engineering :: Chemistry",
-    "Topic :: Scientific/Engineering :: Physics",
 ]
 
 dependencies = [
@@ -40,20 +35,25 @@ dependencies = [
     "scipy>=1.7.0",
     "scikit-learn>=1.0.0",
     "pandas>=1.3.0",
+    "lightgbm>=4.6.0",
 ]
 
 [project.optional-dependencies]
-# 'gpu'という名前でオプションを定義
 gpu = [
     "torch>=1.9.0",
+]
+lightgbm = [
+    "lightgbm>=3.0.0",
 ]
 dev = [
     "ipykernel",
     "matplotlib>=3.3.0",
     "memory-profiler",
+    "build>=1.2.2.post1",
+    "twine>=6.1.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/shinkawa-shuan/mini-sisso" # ★★★ GitHub URLを更新 ★★★
+Homepage = "https://github.com/shinkawa-shuan/mini-sisso"
 Repository = "https://github.com/shinkawa-shuan/mini-sisso"
-Issues = "https://github.com/shinkawa-shuan/mini-sisso/issues" # イシューページへのリンク
+Issues = "https://github.com/shinkawa-shuan/mini-sisso/issues"
