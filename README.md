@@ -1,27 +1,32 @@
 # mini-sisso
 
-# mini-sisso
-
 [![PyPI version](https://badge.fury.io/py/mini-sisso.svg)](https://pypi.org/project/mini-sisso)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/pypi/pyversions/mini-sisso.svg)](https://pypi.org/project/mini-sisso/)
 
 **`mini-sisso` is a lightweight and user-friendly Python implementation of the SISSO (Sure Independence Screening and Sparsifying Operator) symbolic regression algorithm. It offers full compatibility with the scikit-learn ecosystem for discovering interpretable mathematical models from data.**
 
-Inheriting the advanced exploration capabilities of the original C++/Fortran-based implementation, `mini-sisso` provides these features in a more modern and accessible package:
+### Why `mini-sisso` over the original SISSO?
 
--   **🚀 Easy Adoption**: Simple `pip install`. The default CPU version has minimal dependencies (NumPy/SciPy), ensuring a hassle-free setup.
+`mini-sisso` provides the advanced search capabilities of the original C++/Fortran implementation in a more modern and accessible package.
+
 -   **🧠 Memory Efficiency & Fast Exploration**:
-    -   A "recipe-based" architecture dramatically reduces memory consumption during Feature Expansion.
-    -   The "Level-wise SIS" feature (toggleable) speeds up exploration by pruning unpromising features early.
--   **🤝 Full `scikit-learn` Compatibility**: Seamlessly integrates with powerful tools like `GridSearchCV` and `Pipeline`, in addition to the standard `fit()`/`predict()` interface.
--   **⚡ Optional GPU Support**: Achieve significant speedups with GPU acceleration by installing the optional PyTorch backend.
+    -   **"Recipe-based" Architecture**: Dramatically reduces memory consumption during feature expansion, allowing it to handle large-scale problems that would crash the original implementation.
+    -   **"Level-wise SIS" Feature**: Significantly speeds up the search by pruning unpromising features early.
+-   **🚀 Easy Adoption and Use**:
+    -   Simple `pip install` with no complex compilation required.
+    -   Intuitive `scikit-learn`-like `fit()` / `predict()` interface for easy model building and evaluation.
+-   **🤝 Full `scikit-learn` Ecosystem Compatibility**:
+    -   Seamlessly integrates with powerful tools like `GridSearchCV` for automated hyperparameter tuning and `Pipeline` for building workflows.
+-   **⚡ Flexible Search Strategies & GPU Support**:
+    -   In addition to the classic `exhaustive` search, it supports fast feature selectors like `Lasso` and `LightGBM`.
+    -   Offers optional GPU acceleration for further speedups.
 
 ## 📥 Installation
 
 ### CPU Version (Default, Recommended)
 
-Installs the lightweight CPU version from PyPI, which depends only on NumPy/SciPy.
+Installs the CPU version from PyPI. Depends on NumPy, SciPy, scikit-learn, LightGBM, and dcor.
 
 ```bash
 pip install mini-sisso
@@ -46,203 +51,329 @@ from mini_sisso.model import MiniSisso
 
 # 1. Prepare Data
 np.random.seed(42) # Set seed for reproducibility
-# Create feature data (X)
 X_df = pd.DataFrame(np.random.rand(100, 2) *, columns=["feature_A", "feature_B"])
-# Create target data (y) from a true equation: y = 2*sin(feature_A) + feature_B^2 + noise
+# True equation: y = 2*sin(feature_A) + feature_B^2 + noise
 y_series = pd.Series(2 * np.sin(X_df["feature_A"]) + X_df["feature_B"]**2 + np.random.randn(100) * 0.1)
 
-# 2. Instantiate the Model
-# You can set all hyperparameters. Comment out or use defaults for those you don't need.
+# 2. Instantiate the Model (with all hyperparameters shown)
+# Comment out the ones you don't need to use their default values.
 model = MiniSisso(
-    # --- Control the search space ---
-    n_expansion=2,          # Depth of feature expansion (higher value finds more complex equations but takes longer)
-    operators=["+", "sin", "pow2"], # List of operators for feature expansion
+    # --- Control the fundamental search space ---
+    n_expansion=2,                      # Depth of feature expansion (deeper finds more complex eqns but takes longer)
+    operators=["+", "sin", "pow2"],     # List of operators for feature expansion
     
-    # --- Control model complexity ---
-    n_term=2,               # Max number of terms in the equation (for 'exhaustive' method)
+    # --- Select the main search strategy ---
+    so_method="exhaustive",             # Model search strategy ('exhaustive', 'lasso', 'lightgbm')
     
-    # --- Select the search strategy ---
-    so_method="exhaustive", # Model search strategy ('exhaustive' or 'lasso')
-    # alpha=0.01,           # Regularization parameter for so_method='lasso'
+    # --- Detailed settings for each strategy (selection_params) ---
+    selection_params={
+        # -- Parameters for "exhaustive" method --
+        'n_term': 2,                    # Maximum number of terms in the discovered equation
+        'n_sis_features': 10,           # Number of SIS candidates for each term
+        
+        # -- Parameters for "lasso" method --
+        # 'alpha': 0.01,                # Regularization strength for Lasso
+        
+        # -- Parameters for "lightgbm" method --
+        # 'n_features_to_select': 20,   # Number of features to select with LightGBM
+        # 'lightgbm_params': {'n_estimators': 100, 'random_state': 42}, # Parameters for the LightGBM model itself
+        
+        # -- Preprocessing filters for "lasso"/"lightgbm" (optional) --
+        # 'n_global_sis_features': 200, # Number of candidates to pre-screen based on correlation with target
+        # 'collinearity_filter': 'mi',  # Method to calculate correlation between candidates ('mi' or 'dcor')
+        # 'collinearity_threshold': 0.9, # Correlation threshold for the above filter
+    },
     
     # --- Control computational efficiency ---
-    use_levelwise_sis=True, # Use staged feature pruning for speed (strongly recommended)
-    k_per_level=50,         # If use_levelwise_sis=True, number of promising features to keep at each level
-    k=10,                   # Number of feature candidates for each term in the final model
+    use_levelwise_sis=True,             # Speed up with staged search (strongly recommended)
+    n_level_sis_features=50,            # Number of promising features to keep at each expansion level
     
     # --- Select the execution environment ---
-    # device="cuda",          # Specify 'cuda' to use GPU (requires PyTorch)
+    # device="cuda",                      # Specify 'cuda' to use GPU
 )
 
-# 3. Fit the Model
+# 3. Fit the model
 # Uses the same fit(X, y) interface as scikit-learn
 model.fit(X_df, y_series)
 
-# 4. Check the Results
+# 4. Check the results
 # Access fitted attributes (ending with an underscore)
+print("\n--- Fit Results ---")
 print(f"Discovered Equation: {model.equation_}")
 print(f"Training RMSE: {model.rmse_:.4f}")
 print(f"Training R2 Score: {model.r2_:.4f}")
 
-# 5. Make Predictions
+# 5. Make predictions
 # Uses the same predict(X) interface as scikit-learn
+print("\n--- Predictions ---")
 X_test_df = pd.DataFrame(np.array([, ]), columns=["feature_A", "feature_B"])
 predictions = model.predict(X_test_df)
-print(f"\nPredictions for new data: {predictions}")
+print(f"Predictions for new data ([0.5, 1.0], [1.0, 2.0]): {predictions}")
 ```
 
 **Example Output**:
 ```
 Using NumPy/SciPy backend for CPU execution.
 *** Starting Level-wise Recipe Generation (Level-wise SIS: ON, k_per_level=50) ***
-... (training logs) ...
+Level 1: Generated 5, selected top 5. Total promising: 7. Time: 0.00s
+Level 2: Generated 30, selected top 30. Total promising: 37. Time: 0.00s
+***************** Starting SISSO Regressor (NumPy/SciPy Backend, Method: exhaustive) *****************
+
+===== Searching for 1-term models =====
+...
+===== Searching for 2-term models =====
+...
+Best 2-term model: RMSE=0.092124, Eq: +0.998492 * ^2(feature_B) +1.971237 * sin(feature_A) +0.030610
+Time: 0.01 seconds
+
+==================================================
+SISSO fitting finished. Total time: 0.02s
+==================================================
+
 Best Model Found (2 terms):
   RMSE: 0.092124
   R2:   0.998806
   Equation: +0.998492 * ^2(feature_B) +1.971237 * sin(feature_A) +0.030610
 
+--- Fit Results ---
 Discovered Equation: +0.998492 * ^2(feature_B) +1.971237 * sin(feature_A) +0.030610
 Training RMSE: 0.0921
 Training R2 Score: 0.9988
 
-Predictions for new data: [2.0016012 5.6796584]
+--- Predictions ---
+Predictions for new data ([0.5, 1.0], [1.0, 2.0]): [2.0016012 5.6796584]
 ```
 
-## 🛠️ Usage Guide
+## 🛠️ Usage Guide: Controlling the Search with Hyperparameters
 
-### `use_levelwise_sis`: Toggling the Feature Generation Strategy
+The `mini-sisso` search process follows this workflow, with each step controlled by hyperparameters.
 
-This parameter toggles the "Level-wise SIS" feature, which is key to the high performance of `mini-sisso`.
+### Workflow Overview
 
-#### `True` (Default)
-Performs feature expansion level by level, with a screening (SIS) step immediately after each level. Only promising features are used to generate the next level, significantly reducing computation time and memory usage. **This is the recommended setting.**
+1.  **Feature Expansion**: Generates candidate features based on `operators` and `n_expansion`.
+    -   This process is made efficient by `use_levelwise_sis=True` and `n_level_sis_features`.
+2.  **[Optional] Preprocessing Filters**: A set of filters to prune candidate features when using `lasso` or `lightgbm`. (Configured in `selection_params`).
+    -   **Global SIS**: Removes features with low correlation to the target `y`.
+    -   **Collinearity Filter**: Removes highly correlated features from each other.
+3.  **Model Search (Sparsifying Operator)**: The final model is discovered from the pruned candidates using the strategy specified by `so_method`.
 
-```python
-# k_per_level controls how many features are kept at each level
-model_fast = MiniSisso(use_levelwise_sis=True, k_per_level=100)
-```
+---
+### Main Hyperparameters
 
-#### `False`
-Generates all possible features (recipes) for all expansion levels at once before proceeding to the final SIS/SO step.
--   **Pros**: Explores a wider feature space, potentially finding unexpected feature combinations.
--   **Cons**: **Memory usage and computation time increase exponentially.** There is a high risk of `MemoryError` for larger `n_expansion` or a greater number of base features.
+#### `so_method`: The Three Model Search Strategies
 
-```python
-# It is recommended to set n_expansion to a small value
-model_full_search = MiniSisso(use_levelwise_sis=False, n_expansion=2)
-```
+The `so_method` parameter determines the core search approach.
 
-### `so_method`: Selecting the Model Search Strategy
-
-#### `exhaustive` (Default)
-An **exhaustive search** that tests every possible combination of candidate features. It's more likely to find the optimal, interpretable model but can be slow. The number of terms is specified with `n_term`.
+##### 1. `so_method="exhaustive"` (Default)
+The classic SISSO approach. It uses iterative SIS and **exhaustive search** to find the optimal model. Best for finding simple, interpretable models.
 
 ```python
 # Exhaustively search for models up to 3 terms
-model_exhaustive = MiniSisso(
-    so_method="exhaustive", 
-    n_term=3,
-    operators=["+", "-", "*", "sqrt"]
+model = MiniSisso(
+    so_method="exhaustive",
+    selection_params={
+        'n_term': 3,          # Max number of terms to search for
+        'n_sis_features': 15  # Number of candidates to add to the pool at each SIS step
+    }
 )
 ```
 
-#### `lasso`
-Uses **Lasso regression** to quickly select important features from a large pool of candidates. It's extremely fast and effective for large search spaces. The regularization strength is controlled by `alpha`.
+##### 2. `so_method="lasso"`
+Uses **Lasso regression** as a feature selector to build a model quickly. Effective for large feature spaces.
 
 ```python
-# Use Lasso to select features quickly
-# A smaller alpha tends to select more features
-model_lasso = MiniSisso(
+# Select features using Lasso
+model = MiniSisso(
     so_method="lasso",
-    alpha=0.01,
-    operators=["+", "-", "*", "/", "sin", "cos", "exp", "log", "pow2", "pow3"]
+    selection_params={
+        'alpha': 0.01 # Regularization parameter for Lasso
+    }
 )
 ```
 
+##### 3. `so_method="lightgbm"`
+Uses **LightGBM** as a feature selector. Excels at capturing non-linear relationships.
+
+```python
+# Select top 20 features using LightGBM
+model = MiniSisso(
+    so_method="lightgbm",
+    selection_params={
+        'n_features_to_select': 20
+    }
+)
+```
+
+---
+#### `selection_params`: Detailed Control for Each Strategy
+
+The `selection_params` dictionary allows you to apply preprocessing filters and fine-tune each `so_method`.
+
+##### Preprocessing Filters (for `lasso`/`lightgbm`)
+
+-   **`n_global_sis_features`**: Pre-screens candidates by removing those with low correlation to the target `y`.
+-   **`collinearity_filter`**: Removes highly correlated features to stabilize Lasso/LightGBM. Can be `'mi'` (Mutual Information) or `'dcor'` (Distance Correlation).
+
+```python
+# Filter candidates with Global SIS and MI before running LightGBM
+model = MiniSisso(
+    so_method='lightgbm',
+    selection_params={
+        'n_global_sis_features': 200,
+        'collinearity_filter': 'mi',
+        'collinearity_threshold': 0.9,
+        'n_features_to_select': 20
+    }
+)
+```
+
+##### Expert Settings (for `lightgbm`)
+You can also pass internal hyperparameters directly to the LightGBM model.
+```python
+model = MiniSisso(
+    so_method='lightgbm',
+    selection_params={
+        'n_features_to_select': 20,
+        'lightgbm_params': {
+            'n_estimators': 200,         # Number of trees
+            'num_leaves': 40,            # Max number of leaves in one tree
+            'learning_rate': 0.05,       # Learning rate
+            'colsample_bytree': 0.8,     # Fraction of features to be considered for each tree
+            'subsample': 0.8,            # Fraction of data to be used for each tree
+            'reg_alpha': 0.1,            # L1 regularization
+            'reg_lambda': 0.1,           # L2 regularization
+            'random_state': 42,
+            'n_jobs': -1,
+            'verbosity': -1,
+        }
+    }
+)
+```
+
+---
+#### Other Key Parameters
+
+-   `use_levelwise_sis` (bool, default=True): **Strongly recommended.** Speeds up feature generation and saves memory.
+-   `n_level_sis_features` (int, default=50): Number of features to keep at each stage when `use_levelwise_sis=True`.
+-   `device` (str, default="cpu"): Set to `"cuda"` to use the GPU backend.
+
 ### Available Operators
+Specify the `operators` argument as a list of strings.
 
-Specify as a list of strings in the `operators` argument.
-
-| Operator | Description            |
-| :------- | :--------------------- |
-| `'+'`    | Addition (a + b)       |
-| `'-'`    | Subtraction (a - b)    |
-| `'*'`    | Multiplication (a * b) |
-| `'/'`    | Division (a / b)       |
-| `'sin'`  | Sine (sin(a))          |
-| `'cos'`  | Cosine (cos(a))        |
-| `'exp'`  | Exponential (e^a)      |
-| `'log'`  | Natural Log (ln(a))    |
-| `'sqrt'` | Square Root (sqrt(     | a | )) *Safe for negative inputs* |
-| `'pow2'` | Square (a^2)           |
-| `'pow3'` | Cube (a^3)             |
-| `'inv'`  | Inverse (1/a)          |
+| Operator | Description               |
+| :------- | :------------------------ |
+| `'+'`    | Addition (a + b)          |
+| `'-'`    | Subtraction (a - b)       |
+| `'*'`    | Multiplication (a * b)    |
+| `'/'`    | Division (a / b)          |
+| `'sin'`  | Sine (sin(a))             |
+| `'cos'`  | Cosine (cos(a))           |
+| `'exp'`  | Exponential (e^a)         |
+| `'log'`  | Natural logarithm (ln(a)) |
+| `'sqrt'` | Square root (sqrt(        | a | )) *No error for negative values* |
+| `'pow2'` | Square (a^2)              |
+| `'pow3'` | Cube (a^3)                |
+| `'inv'`  | Reciprocal (1/a)          |
 
 ## 🤝 `scikit-learn` Ecosystem Integration
+`mini-sisso` inherits `BaseEstimator` and `RegressorMixin` from `scikit-learn`, allowing it to seamlessly integrate with the powerful tools provided by `scikit-learn`.
 
-As a fully compliant `scikit-learn` estimator, `mini-sisso` works seamlessly with the entire ecosystem.
+### More detailed usage of `Pipeline`
 
-### `Pipeline` for Preprocessing
+`Pipeline` is a tool for connecting multiple processing steps and treating them as a single estimator.
 
 ```python
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from mini_sisso.model import MiniSisso
 
-# Note: MiniSisso can be sensitive to feature scaling. 
-# Preprocessing like StandardScaler is often not recommended.
+# Pipeline definition
+# Note: MiniSisso is sensitive to the scale of input features, so preprocessing such as StandardScaler
+# may impair the interpretability of the discovered formula. It is generally not recommended.
+# Here is an example to demonstrate how Pipeline technically works.
 pipeline = Pipeline([
-    # ('scaler', StandardScaler()),
-    ('sisso', MiniSisso(n_expansion=2, n_term=2, operators=["+", "sin", "pow2"]))
+# Step 1: Run standardization using the name 'scaler'
+('scaler', StandardScaler()), # Usually unnecessary/not recommended for MiniSisso
+# Step 2: Run MiniSisso using the name 'sisso'
+('sisso', MiniSisso(n_expansion=2, selection_params={'n_term': 2}, operators=["+", "sin", "pow2"]))
 ])
 
+# Train the entire pipeline: X -> scaler.fit_transform -> sisso.fit
 pipeline.fit(X_df, y_series)
+
+# Predict using the pipeline: X -> scaler.transform -> sisso.predict
 predictions = pipeline.predict(X_df)
+
+# You can also access and change parameters for each step of the pipeline.
+# Example: Changing the number of SISSO terms after training
+# pipeline.set_params(sisso__selection_params={'n_term': 3})
+print(f"Number of terms in the SISSO step of the pipeline: {pipeline.named_steps['sisso'].selection_params['n_term']}")
 ```
 
-### `GridSearchCV` for Hyperparameter Tuning
+### Advanced `GridSearchCV` Usage
 
-Automatically find the best hyperparameters like `n_term`, `k` (number of SIS candidates), or `alpha`.
+`GridSearchCV` can automatically find the best combination of hyperparameters, including the `so_method` itself. The `__` (double underscore) syntax allows you to search nested parameters within `selection_params`.
 
 ```python
 from sklearn.model_selection import GridSearchCV
 
-param_grid = {
-    'n_term':,
-    'k':,
-}
+# Define a list of parameter grids to search over
+param_grid = [
+    # Case 1: Search patterns for exhaustive method
+    {
+        'so_method': ['exhaustive'],
+        'selection_params': [
+            {'n_term': 2, 'n_sis_features': 10},
+            {'n_term': 3, 'n_sis_features': 15}
+        ]
+    },
+    # Case 2: Search patterns for lasso method
+    {
+        'so_method': ['lasso'],
+        'selection_params': [
+            {'alpha': 0.01, 'collinearity_filter': 'mi'},
+            {'alpha': 0.005}
+        ]
+    },
+    # Case 3: Search patterns for lightgbm method
+    {
+        'so_method': ['lightgbm'],
+        'selection_params__n_features_to_select':,
+        'selection_params__lightgbm_params__n_estimators':,
+    }
+]
 
 grid_search = GridSearchCV(
-    MiniSisso(operators=["+", "sin", "pow2"]),
-    param_grid, cv=3, scoring='neg_root_mean_squared_error', n_jobs=-1
+    MiniSisso(n_expansion=2, operators=['+', 'sin', 'pow2']),
+    param_grid, cv=3, scoring='neg_root_mean_squared_error', n_jobs=-1, verbose=1
 )
+
+print("Starting GridSearchCV to find the best method and parameters...")
 grid_search.fit(X_df, y_series)
 
-print(f"Best Hyperparameters: {grid_search.best_params_}")
-print(f"Best Model Equation: {grid_search.best_estimator_.equation_}")
+print(f"\nBest search method and params: {grid_search.best_params_}")
+print(f"Equation from the best model: {grid_search.best_estimator_.equation_}")
 ```
 
 ## ⚙️ API Reference
 
 ### `MiniSisso`
-
 ```python
 class MiniSisso(BaseEstimator, RegressorMixin):
-    def __init__(self, n_expansion: int = 2, n_term: int = 2, k: int = 10, 
-                 k_per_level: int = 50, use_levelwise_sis: bool = True,
-                 operators: list = None, so_method: str = "exhaustive", alpha: float = 0.01,
+    def __init__(self, n_expansion: int = 2, operators: list = None,
+                 so_method: str = "exhaustive", selection_params: dict = None,
+                 use_levelwise_sis: bool = True, n_level_sis_features: int = 50,
                  device: str = "cpu"):
 ```
 
-#### Parameters
--   `n_expansion` (int, default=2): The maximum level of feature expansion.
--   `n_term` (int, default=2): The maximum number of terms in the final model (for `exhaustive` search).
--   `k` (int, default=10): The number of promising features to select in each iteration of the SIS step.
--   `k_per_level` (int, default=50): If `use_levelwise_sis=True`, this is the number of promising recipes to carry over to the next expansion level.
+### `MiniSisso`
+-   `n_expansion` (int, default=2): Max level of feature expansion.
+-   `operators` (list[str], required): List of operators for feature generation.
+-   `so_method` (str, default="exhaustive"): Model search strategy (`"exhaustive"`, `"lasso"`, `"lightgbm"`).
+-   `selection_params` (dict, optional): Dictionary of detailed parameters for the selected `so_method` and preprocessing filters.
 -   `use_levelwise_sis` (bool, default=True): Toggles the level-wise SIS feature.
--   `device` (str, default="cpu"): The computing device to use ('cpu' or 'cuda').
--   `operators` (list[str], required): A list of operators to use for feature expansion.
--   `so_method` (str, default="exhaustive"): The model search strategy. Can be `"exhaustive"` or `"lasso"`.
--   `alpha` (float, default=0.01): The regularization parameter used when `so_method="lasso"`.
+-   `n_level_sis_features` (int, default=50): Number of features to keep at each level if `use_levelwise_sis=True`.
+-   `device` (str, default="cpu"): Computation device (`"cpu"` or `"cuda"`).
 
 ---
 

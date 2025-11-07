@@ -7,7 +7,7 @@ packages = ["src/mini_sisso"]
 
 [project]
 name = "mini-sisso"
-version = "1.1.0"
+version = "1.2.0"
 description = "A lightweight and user-friendly Python implementation of the SISSO algorithm for symbolic regression, compatible with scikit-learn."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -17,16 +17,10 @@ authors = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Intended Audience :: Science/Research",
     "Development Status :: 4 - Beta",
-    "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
@@ -35,14 +29,13 @@ dependencies = [
     "scipy>=1.7.0",
     "scikit-learn>=1.0.0",
     "pandas>=1.3.0",
+    "lightgbm>=3.0.0",
+    "dcor>=0.6",
 ]
 
 [project.optional-dependencies]
 gpu = [
     "torch>=1.9.0",
-]
-lightgbm = [
-    "lightgbm>=3.0.0",
 ]
 
 [project.urls]

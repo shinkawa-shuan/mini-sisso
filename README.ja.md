@@ -1,3 +1,4 @@
+
 # mini-sisso
 
 [![PyPI version](https://badge.fury.io/py/mini-sisso.svg)](https://pypi.org/project/mini-sisso)
@@ -6,20 +7,27 @@
 
 **`mini-sisso` は、シンボリック回帰アルゴリズム SISSOをPythonで実装した、軽量で手軽なライブラリです。scikit-learnエコシステムと完全に互換性があり、データから人間が解釈可能な数式モデルを発見します。**
 
-C++/Fortranベースのオリジナル実装が持つ高度な探索能力を、よりモダンで使いやすい形で提供します。
+### SISSOとの違い：なぜ`mini-sisso`なのか？
 
--   **🚀 手軽な導入**: `pip install` で簡単インストール。CPU版はNumPy/SciPyのみに依存し、軽量です。
+`mini-sisso`は、C++/Fortranベースのオリジナル実装が持つ高度な探索能力を、よりモダンで使いやすい形で提供します。
+
 -   **🧠 メモリ効率と高速な探索**:
-    -   「レシピ化」アーキテクチャにより、特徴拡張時のメモリ消費を劇的に削減。
-    -   「レベルワイズSIS」機能（オン/オフ可能）により、無駄な計算を省き、探索を高速化。
--   **🤝 `scikit-learn`完全互換**: `fit`/`predict`インターフェースはもちろん、`GridSearchCV`や`Pipeline`とシームレスに連携。
--   **⚡ オプションのGPUサポート**: `pip install "mini-sisso[gpu]"`でPyTorchを導入すれば、GPUアクセラレーションによるさらなる高速化が可能です。
+    -   **「レシピ化」アーキテクチャ**: 特徴拡張時のメモリ消費を劇的に削減し、オリジナル実装ではメモリ不足でクラッシュするような大規模な問題も扱えます。
+    -   **「レベルワイズSIS」機能**: 無駄な計算を早期に枝刈りし、探索を大幅に高速化します。
+-   **🚀 手軽な導入と利用**:
+    -   `pip install` で簡単インストール。複雑なコンパイルは不要です。
+    -   `scikit-learn`ライクな`fit()` / `predict()` インターフェースにより、直感的にモデルを構築・評価できます。
+-   **🤝 `scikit-learn`エコシステムとの完全な互換性**:
+    -   `GridSearchCV`によるハイパーパラメータ自動探索や、`Pipeline`によるワークフロー構築が可能です。
+-   **⚡ 柔軟な探索戦略とGPUサポート**:
+    -   古典的な`exhaustive`（総当たり）探索に加え、高速な`Lasso`や`LightGBM`を特徴選択器として利用できます。
+    -   オプションでGPUアクセラレーションにも対応し、さらなる高速化が可能です。
 
 ## 📥 インストール
 
 ### CPU版 (デフォルト・推奨)
 
-PyPIから軽量なCPU版をインストールします。NumPy/SciPyのみに依存します。
+PyPIからインストールします。NumPy, SciPy, scikit-learn, LightGBM, dcorに依存します。
 
 ```bash
 pip install mini-sisso
@@ -44,50 +52,61 @@ from mini_sisso.model import MiniSisso
 
 # 1. データの準備
 np.random.seed(42) # 再現性のための乱数シード固定
-# 特徴量データを作成 (X)
 X_df = pd.DataFrame(np.random.rand(100, 2) *, columns=["feature_A", "feature_B"])
-# 真の式 y = 2*sin(feature_A) + feature_B^2 にノイズを加えてターゲットデータを作成 (y)
+# 真の式: y = 2*sin(feature_A) + feature_B^2 + ノイズ
 y_series = pd.Series(2 * np.sin(X_df["feature_A"]) + X_df["feature_B"]**2 + np.random.randn(100) * 0.1)
 
-# 2. モデルのインスタンス化
-# MiniSissoの全ハイパーパラメータを設定できます。
-# 使わないものはコメントアウトしたり、デフォルト値のままにします。
+# 2. モデルのインスタンス化 (全ハイパーパラメータ)
+# 実際に使うもの以外はコメントアウトして、デフォルト値を使用します。
 model = MiniSisso(
-    # --- 探索空間の制御 ---
-    n_expansion=2,          # 特徴拡張のレベル (深くするほど複雑な式を発見できるが計算時間増)
-    operators=["+", "sin", "pow2"], # 特徴拡張に使う演算子リスト
+    # --- 基本的な探索空間の制御 ---
+    n_expansion=2,                      # 特徴拡張のレベル (深くするほど複雑な式を発見)
+    operators=["+", "sin", "pow2"],     # 特徴拡張に使う演算子リスト
     
-    # --- モデルの複雑さの制御 ---
-    n_term=2,               # 発見する数式の最大項数 (exhaustiveメソッド用)
+    # --- 探索戦略の主要な選択 ---
+    so_method="exhaustive",             # モデル探索戦略 ('exhaustive', 'lasso', 'lightgbm')
     
-    # --- 探索戦略の選択 ---
-    so_method="exhaustive", # モデル探索戦略 ('exhaustive' or 'lasso')
-    # alpha=0.01,           # so_method='lasso' の場合に使う正則化パラメータ
+    # --- 各戦略の詳細設定 (selection_params) ---
+    selection_params={
+        # -- "exhaustive"メソッド用のパラメータ --
+        'n_term': 2,                    # 発見する数式の最大項数
+        'n_sis_features': 10,           # 各項を見つけるためのSIS候補数
+        
+        # -- "lasso"メソッド用のパラメータ --
+        # 'alpha': 0.01,                # Lassoの正則化の強さ
+        
+        # -- "lightgbm"メソッド用のパラメータ --
+        # 'n_features_to_select': 20,   # LightGBMで選択する特徴の数
+        # 'lightgbm_params': {'n_estimators': 100, 'random_state': 42}, # LightGBMモデル自体のパラメータ
+        
+        # -- "lasso"/"lightgbm"用の前処理フィルター (オプション) --
+        # 'n_global_sis_features': 200, # 最初にターゲットとの相関で候補を絞る数
+        # 'collinearity_filter': 'mi',  # 候補同士の相関を計算する方法 ('mi' or 'dcor')
+        # 'collinearity_threshold': 0.9, # 上記フィルターで削除する相関の閾値
+    },
     
     # --- 計算効率の制御 ---
-    use_levelwise_sis=True, # 段階的に特徴を枝刈りする高速化機能 (Trueを強く推奨)
-    k_per_level=50,         # use_levelwise_sis=True の場合、各レベルで残す有望な特徴の数
-    k=10,                   # 最終的なモデル構築の際、各項の候補となる特徴の数
+    use_levelwise_sis=True,             # 段階的探索による高速化 (Trueを強く推奨)
+    n_level_sis_features=50,            # 各拡張レベルで残す有望な特徴の数
     
     # --- 実行環境の選択 ---
-    # device="cuda",          # GPUを使う場合は 'cuda' を指定 (別途PyTorchが必要)
+    # device="cuda",                      # GPUを使う場合は 'cuda' を指定
 )
 
 # 3. モデルの学習
-# scikit-learnと同じく fit(X, y) で学習
 model.fit(X_df, y_series)
 
 # 4. 学習結果の確認
-# 学習済みの属性 (末尾にアンダースコアが付く) にアクセス
+print("\n--- 学習結果 ---")
 print(f"発見された数式: {model.equation_}")
 print(f"訓練RMSE: {model.rmse_:.4f}")
 print(f"訓練R2スコア: {model.r2_:.4f}")
 
 # 5. 新しいデータで予測
-# scikit-learnと同じく predict(X) で予測
+print("\n--- 予測 ---")
 X_test_df = pd.DataFrame(np.array([, ]), columns=["feature_A", "feature_B"])
 predictions = model.predict(X_test_df)
-print(f"\n新しいデータに対する予測結果: {predictions}")
+print(f"新しいデータ ([0.5, 1.0], [1.0, 2.0]) に対する予測結果: {predictions}")
 ```
 
 **出力例**:
@@ -119,64 +138,130 @@ Best Model Found (2 terms):
   R2:   0.998806
   Equation: +0.998492 * ^2(feature_B) +1.971237 * sin(feature_A) +0.030610
 
+--- 学習結果 ---
 発見された数式: +0.998492 * ^2(feature_B) +1.971237 * sin(feature_A) +0.030610
 訓練RMSE: 0.0921
 訓練R2スコア: 0.9988
 
+--- 予測 ---
 新しいデータに対する予測結果: [2.0016012 5.6796584]
 ```
 
-## 🛠️ 使い方ガイド
+## 🛠️ 使い方ガイド：ハイパーパラメータによる探索制御
 
-### `use_levelwise_sis`: 特徴生成戦略の切り替え
+`mini-sisso`の探索プロセスは、以下のワークフローで構成され、各ステップはハイパーパラメータで制御されます。
 
-`mini-sisso`の高速化の鍵である「レベルワイズSIS」機能のオン/オフを切り替えます。
+### ワークフロー概要
 
-#### `True` (デフォルト)
-特徴拡張をレベル（段階）ごとに行い、各レベルの直後にスクリーニング（SIS）を実行します。有望な特徴だけを次のレベルの生成に使用するため、計算時間とメモリ使用量を大幅に削減できます。**通常はこちらの使用を推奨します。**
+1.  **特徴拡張 (Feature Expansion)**: `operators`と`n_expansion`に基づき、多数の候補特徴を生成します。
+    -   この過程は `use_levelwise_sis=True` と `n_level_sis_features` によって効率化されます（後述）。
+2.  **[任意] 前処理フィルター (Preprocessing Filters)**: `lasso`/`lightgbm`使用時に、候補特徴を絞り込むためのフィルター群です。(`selection_params`で設定)
+    -   **大域的SIS (Global SIS)**: ターゲット`y`との相関が低い特徴を除外します。
+    -   **多重共線性フィルター (Collinearity Filter)**: 候補特徴同士の相関が高すぎるものを削除します。
+3.  **モデル探索 (Sparsifying Operator)**: `so_method`で指定された戦略で、絞り込まれた候補の中から最終的なモデルを発見します。
 
-```python
-# k_per_levelで各レベルで残す特徴数を制御できる
-model_fast = MiniSisso(use_levelwise_sis=True, k_per_level=100)
-```
+---
 
-#### `False`
-特徴拡張の全レベルで考えられるすべての特徴（レシピ）を一度に生成してから、最終的なSIS/SOステップを実行します。
--   **長所**: 探索空間が広がり、思わぬ特徴の組み合わせが見つかる可能性があります。
--   **短所**: **メモリ使用量と計算時間が爆発的に増加します。** `n_expansion`が大きい場合や、ベース特徴量の数が多い場合は、メモリ不足でプログラムがクラッシュするリスクがあります。
+### 主要なハイパーパラメータ
 
-```python
-# n_expansionは小さく設定することを推奨
-model_full_search = MiniSisso(use_levelwise_sis=False, n_expansion=2)
-```
+#### `so_method`: 3つのモデル探索戦略
 
-### `so_method`: モデル探索戦略の選択
+`so_method`を選ぶことで、探索の基本的なアプローチを決定します。
 
-#### `exhaustive` (デフォルト)
-候補となる特徴のすべての組み合わせをテストする**総当たり探索**。シンプルで解釈しやすいモデルが見つかりやすいですが、計算時間は組み合わせ的に増加します。`n_term`で使用する項数を指定します。
+##### 1. `so_method="exhaustive"` (デフォルト)
+SISSOの古典的なアプローチ。SISで有望な特徴を絞り込みながら、**総当たり探索**で最適なモデルを探します。解釈しやすいシンプルなモデルが見つかりやすいです。
 
 ```python
 # 3項までのモデルを総当たりで探索
-model_exhaustive = MiniSisso(
-    so_method="exhaustive", 
-    n_term=3,
-    operators=["+", "-", "*", "sqrt"]
+model = MiniSisso(
+    so_method="exhaustive",
+    selection_params={
+        'n_term': 3,          # 探索する最大項数
+        'n_sis_features': 15  # 各項を見つけるためにプールに追加する候補数
+    }
 )
 ```
 
-#### `lasso`
-**Lasso回帰**を用いて、多数の候補から重要な特徴を高速に選択します。`exhaustive`では現実的でない大規模な探索空間で有効です。`alpha`パラメータで正則化の強さを調整します。
+##### 2. `so_method="lasso"`
+**Lasso回帰**を特徴選択器として使い、高速にモデルを構築します。大規模な特徴空間で有効です。
 
 ```python
-# Lassoで高速に特徴を選択
-# alphaが小さいほど、多くの特徴が選択される傾向にある
-model_lasso = MiniSisso(
+# Lassoで特徴選択
+model = MiniSisso(
     so_method="lasso",
-    alpha=0.01,
-    operators=["+", "-", "*", "/", "sin", "cos", "exp", "log", "pow2", "pow3"]
+    selection_params={
+        'alpha': 0.01 # Lassoの正則化パラメータ
+    }
 )
 ```
-**`alpha`の調整**: `alpha`は試行錯誤が必要です。`LASSO selected 0 features.`と表示されたら`alpha`を小さく、特徴を選びすぎる場合は大きくしてみてください。
+
+##### 3. `so_method="lightgbm"`
+**LightGBM**を特徴選択器として使います。非線形な関係性を捉える能力に優れています。
+
+```python
+# LightGBMで上位20個の特徴を選択
+model = MiniSisso(
+    so_method="lightgbm",
+    selection_params={
+        'n_features_to_select': 20
+    }
+)
+```
+
+---
+#### `selection_params`: 各戦略の詳細制御
+
+`selection_params`辞書を使うことで、各`so_method`の挙動を細かく制御したり、前処理フィルターを適用したりできます。
+
+##### 前処理フィルター (`lasso`/`lightgbm`用)
+
+-   **`n_global_sis_features`**: 大域的SISによる事前スクリーニング。最初に、ターゲット`y`と全く相関のない特徴をまとめて除外します。
+-   **`collinearity_filter`**: 多重共線性（マルチコ）の排除。`'mi'` (相互情報量) or `'dcor'` (距離相関) を指定できます。
+
+```python
+# 全候補からyとの相関が高い上位200個に絞り込み、
+# さらにMIが0.9以上のペアを除外してからLightGBMを実行
+model = MiniSisso(
+    so_method='lightgbm',
+    selection_params={
+        'n_global_sis_features': 200,
+        'collinearity_filter': 'mi',
+        'collinearity_threshold': 0.9,
+        'n_features_to_select': 20
+    }
+)
+```
+
+##### エキスパート向け設定 (`lightgbm`用)
+`lightgbm`の内部ハイパーパラメータを直接指定することも可能です。
+```python
+model = MiniSisso(
+    so_method='lightgbm',
+    selection_params={
+        'n_features_to_select': 20,
+        'lightgbm_params': {
+                'n_estimators': 100,         # 木の数: 100本あれば特徴重要度の評価には十分なことが多い
+                'num_leaves': 31,            # 葉の最大数: デフォルト値。バランスが良い
+                'max_depth': -1,             # 木の深さ: -1は無制限。num_leavesで制御するため、通常は-1でOK
+                'learning_rate': 0.1,        # 学習率: デフォルト値。n_estimatorsとのバランスで決まる
+                'colsample_bytree': 0.8,     # 特徴量のランダムサンプリング率: 過学習を防ぐための一般的な値
+                'subsample': 0.8,            # データ（行）のランダムサンプリング率: 同上
+                'reg_alpha': 0.1,            # L1正則化: わずかに正則化をかける
+                'reg_lambda': 0.1,           # L2正則化: 同上
+                'random_state': 42,          # 再現性のための乱数シード
+                'n_jobs': -1,                # 利用可能なCPUコアをすべて使用
+                'verbosity': -1,             # LightGBMのログを非表示に
+            }   
+        }
+)
+```
+
+---
+#### その他の主要パラメータ
+
+-   `use_levelwise_sis` (bool, default=True): 特徴生成を段階的に行い、計算を高速化・省メモリ化します。**オフにすると計算量が爆発する可能性があるため、`True`を強く推奨します。**
+-   `n_level_sis_features` (int, default=50): `use_levelwise_sis=True`の場合、各レベルで残す有望な特徴の数です。
+-   `device` (str, default="cpu"): 計算バックエンド。`"cuda"`を指定するとGPUを使用します。
 
 ### 利用可能な演算子
 
@@ -197,96 +282,119 @@ model_lasso = MiniSisso(
 | `'pow3'` | 3乗 (a^3)         |
 | `'inv'`  | 逆数 (1/a)        |
 
+
 ## 🤝 `scikit-learn`エコシステムとの連携
 
 `mini-sisso`は`scikit-learn`の`BaseEstimator`と`RegressorMixin`を継承しているため、`scikit-learn`が提供する強力なツール群とシームレスに連携できます。
 
-### `Pipeline`による前処理との連結
+### `Pipeline`のより詳しい使い方
+
+`Pipeline`は、複数の処理ステップを連結し、一つの推定器として扱うためのツールです。
 
 ```python
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from mini_sisso.model import MiniSisso
 
-# データ準備
-X_df = pd.DataFrame(np.random.rand(100, 2) *, columns=["feature_A", "feature_B"])
-y_series = pd.Series(2 * np.sin(X_df["feature_A"]) + X_df["feature_B"]**2 + np.random.randn(100) * 0.1)
-
 # Pipelineの定義
-# 注意: MiniSissoは入力特徴量のスケールに敏感なため、StandardScalerのような前処理は推奨されません。
+# 注意: MiniSissoは入力特徴量のスケールに敏感なため、StandardScalerのような前処理は
+# 発見される数式の解釈性を損なう可能性があります。通常は非推奨です。
+# ここでは、Pipelineが技術的に動作することを示すための例です。
 pipeline = Pipeline([
-    # ('scaler', StandardScaler()), # MiniSissoでは通常不要/非推奨
-    ('sisso', MiniSisso(n_expansion=2, n_term=2, operators=["+", "sin", "pow2"]))
+    # ステップ1: 'scaler'という名前で標準化を実行
+    ('scaler', StandardScaler()), # MiniSissoでは通常不要/非推奨
+    # ステップ2: 'sisso'という名前でMiniSissoを実行
+    ('sisso', MiniSisso(n_expansion=2, selection_params={'n_term': 2}, operators=["+", "sin", "pow2"]))
 ])
 
-# Pipeline全体を学習
+# Pipeline全体を学習: X -> scaler.fit_transform -> sisso.fit
 pipeline.fit(X_df, y_series)
 
-# 予測
+# Pipelineを使って予測: X -> scaler.transform -> sisso.predict
 predictions = pipeline.predict(X_df)
-print(f"Pipelineによる予測 (一部): {predictions[:5]}")
+
+# パイプラインの各ステップのパラメータにアクセス・変更も可能
+# 例: 学習後にSISSOの項数を変更する
+# pipeline.set_params(sisso__selection_params={'n_term': 3})
+print(f"PipelineのSISSOステップの項数: {pipeline.named_steps['sisso'].selection_params['n_term']}")
 ```
 
-### `GridSearchCV`によるハイパーパラメータチューニング
+### `GridSearchCV`のより詳しい使い方
+
+`GridSearchCV`は、ハイパーパラメータの最適な組み合わせを交差検証によって自動で探索します。`__`（ダブルアンダースコア）を使うことで、`selection_params`のような辞書内のパラメータも探索対象にできます。
+
+#### 例：`exhaustive`と`lasso`で最適な手法とパラメータを同時に探索
 
 ```python
 from sklearn.model_selection import GridSearchCV
-from mini_sisso.model import MiniSisso
 
-# データ準備
-X_df = pd.DataFrame(np.random.rand(100, 2) *, columns=["feature_A", "feature_B"])
-y_series = pd.Series(2 * np.sin(X_df["feature_A"]) + X_df["feature_B"]**2 + np.random.randn(100) * 0.1)
+# 探索したいパターンのリストを作成
+param_grid = [
+    # パターン1: exhaustiveメソッドの探索
+    {
+        'so_method': ['exhaustive'],
+        'selection_params': [
+            {'n_term': 2, 'n_sis_features': 10},
+            {'n_term': 3, 'n_sis_features': 15}
+        ]
+    },
+    # パターン2: lassoメソッドの探索
+    {
+        'so_method': ['lasso'],
+        'selection_params': [
+            {'alpha': 0.01, 'collinearity_filter': 'mi', 'collinearity_threshold': 0.9},
+            {'alpha': 0.005, 'collinearity_filter': 'mi'}
+        ]
+    }
+    # パターン3: lightgbmメソッドの探索
+    {
+        'so_method': ['lightgbm'],
+        # selection_params内のパラメータを探索
+        'selection_params__n_features_to_select': [10, 20],
+        # lightgbm_params内のパラメータを探索 (二重アンダースコアに注意)
+        'selection_params__lightgbm_params__n_estimators': [100, 200],
+        'selection_params__lightgbm_params__num_leaves': [20, 31],
+    }
 
-# チューニングしたいハイパーパラメータのグリッドを定義
-param_grid = {
-    'n_expansion':,
-    'n_term':,
-    'k':,
-    'use_levelwise_sis': [True], # 通常はTrueに固定
-    # 'alpha': [0.001, 0.01, 0.1] # lassoを使う場合
-}
+]
 
 # GridSearchCVのインスタンスを作成
 grid_search = GridSearchCV(
-    MiniSisso(operators=["+", "sin", "pow2"], so_method="exhaustive"),
+    MiniSisso(n_expansion=2, operators=['+', 'sin', 'pow2']),
     param_grid,
-    cv=3,
+    cv=3,   # 3分割交差検証
     scoring='neg_root_mean_squared_error',
-    n_jobs=-1,
-    verbose=1,
+    n_jobs=-1, # 利用可能なCPUコアをすべて使う
+    verbose=1, # ログを詳細に出力
 )
 
-# ハイパーパラメータの探索を実行
+# ハイパーパラメータ探索を実行
+print("Starting GridSearchCV to find the best method and parameters...")
 grid_search.fit(X_df, y_series)
 
-print(f"\n最適なハイパーパラメータ: {grid_search.best_params_}")
-print(f"最良モデルのRMSE (交差検証): {-grid_search.best_score_:.4f}")
+print(f"\n最適だった探索手法とパラメータ: {grid_search.best_params_}")
 print(f"最良モデルの数式: {grid_search.best_estimator_.equation_}")
 ```
 
 ## ⚙️ APIリファレンス
 
 ### `MiniSisso`
-
 ```python
 class MiniSisso(BaseEstimator, RegressorMixin):
-    def __init__(self, n_expansion: int = 2, n_term: int = 2, k: int = 10, 
-                 k_per_level: int = 50, use_levelwise_sis: bool = True,
-                 operators: list = None, so_method: str = "exhaustive", alpha: float = 0.01,
+    def __init__(self, n_expansion: int = 2, operators: list = None,
+                 so_method: str = "exhaustive", selection_params: dict = None,
+                 use_levelwise_sis: bool = True, n_level_sis_features: int = 50,
                  device: str = "cpu"):
 ```
-
 #### パラメータ
 -   `n_expansion` (int, default=2): 特徴拡張の最大レベル。
--   `n_term` (int, default=2): 見つける数式モデルの最大項数 (`exhaustive`サーチ用)。
--   `k` (int, default=10): SISステップで、各反復で選択する有望な特徴の数。
--   `k_per_level` (int, default=50): `use_levelwise_sis=True`の場合、各拡張レベルで次のステップに引き継ぐ有望なレシピの数。
--   `use_levelwise_sis` (bool, default=True): レベルワイズSIS機能のオン/オフを切り替えます。
--   `device` (str, default="cpu"): 計算に使用するデバイス。`"cuda"`または`"cpu"`。
 -   `operators` (list[str], required): 特徴拡張に使用する演算子のリスト。
--   `so_method` (str, default="exhaustive"): モデル探索戦略。`"exhaustive"`または`"lasso"`を選択。
--   `alpha` (float, default=0.01): `so_method="lasso"`の場合に使用する正則化パラメータ。
-
+-   `so_method` (str, default="exhaustive"): モデル探索戦略。`"exhaustive"`, `"lasso"`, `"lightgbm"`から選択。
+-   `selection_params` (dict, optional): 各探索戦略の詳細な挙動を制御するパラメータの辞書。キーは`n_term`, `n_sis_features`, `alpha`, `n_features_to_select`, `lightgbm_params`, `n_global_sis_features`, `collinearity_filter`, `collinearity_threshold`など。
+-   `use_levelwise_sis` (bool, default=True): レベルワイズSIS機能のオン/オフ。
+-   `n_level_sis_features` (int, default=50): `use_levelwise_sis=True`の場合、各拡張レベルで残す特徴の数。
+-   `device` (str, default="cpu"): 計算に使用するデバイス (`"cpu"` or `"cuda"`)。
+ 
 ---
 
 ### `fit(X, y)`
