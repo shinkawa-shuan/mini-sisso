@@ -1,122 +1,117 @@
-# feature_generator.py (Dependency on executor removed)
+# feature_generator.py
 import time
-from itertools import combinations
-
-# RecipeExecutorの型ヒントのためだけなので、前方参照を使うか、Anyを使う
-from typing import Any, Dict, List, Set
-
+from typing import List, Set, Dict, Any
 import numpy as np
-
-from .recipe import BinaryOperator, FeatureRecipe, Operator, UnaryOperator
-
-# from .executor import RecipeExecutor # ★★★ この行を削除 ★★★
-
+from .recipe import FeatureRecipe, Operator, UnaryOperator, BinaryOperator
 
 class FeatureGenerator:
     def __init__(self, base_feature_names: List[str], operators: Dict[str, Operator]):
         self.base_feature_names = base_feature_names
         self.operators = operators
-        self.base_recipes = [FeatureRecipe(op=operators["base"], base_feature_index=i) for i in range(len(base_feature_names))]
+        self.base_recipes = [
+            FeatureRecipe(op=operators['base'], base_feature_index=i)
+            for i in range(len(base_feature_names))
+        ]
 
-    # ... (expand_full, _generate_next_levelメソッドは変更なし) ...
     def expand_full(self, n_expansion: int) -> List[FeatureRecipe]:
-        """
-        レベルワイズSISをオフにした場合のメソッド。
-        n_expansionレベルまでのすべてのレシピを一括で生成する。
-        """
         print(f"*** Starting Full Recipe Generation (Level-wise SIS: OFF) ***")
-        all_recipes: Set[FeatureRecipe] = set(self.base_recipes)
-
+        all_recipes_set: Set[FeatureRecipe] = set(self.base_recipes)
         recipes_at_level = [set(self.base_recipes)]
 
         for i in range(1, n_expansion + 1):
             start_time = time.time()
-            prev_all_recipes = set.union(*recipes_at_level)
-            newly_generated = self._generate_next_level(prev_all_recipes, recipes_at_level[-1])
-
+            prev_all = set.union(*recipes_at_level)
+            newly_generated = self._generate_next_level(prev_all, recipes_at_level[-1])
+            
             recipes_at_level.append(newly_generated)
-            all_recipes.update(newly_generated)
+            all_recipes_set.update(newly_generated)
+            print(f"Level {i}: Generated {len(newly_generated)}. Total: {len(all_recipes_set)}. Time: {time.time() - start_time:.2f}s")
 
-            print(f"Level {i}: Generated {len(newly_generated)} new recipes. Total unique recipes: {len(all_recipes)}. Time: {time.time() - start_time:.2f}s")
+        # ★★★ 決定論的ソート: 文字列表現でソートして返す ★★★
+        return sorted(list(all_recipes_set), key=lambda r: str(r))
 
-        return list(all_recipes)
-
-    # ★★★ シグネチャを変更: executorを引数として受け取る ★★★
     def expand_with_levelwise_sis(self, n_expansion: int, k_per_level: int, executor: Any, y_target: np.ndarray) -> List[FeatureRecipe]:
-        print(f"*** Starting Level-wise Recipe Generation (Level-wise SIS: ON, k_per_level={k_per_level}) ***")
-        all_promising_recipes: Set[FeatureRecipe] = set(self.base_recipes)
-        recipes_at_prev_level: Set[FeatureRecipe] = set(self.base_recipes)
+        print(f"*** Starting Level-wise Recipe Generation (Level-wise SIS: ON, k={k_per_level}) ***")
+        
+        # 初期化時もソートしておく
+        all_promising_recipes = sorted(self.base_recipes, key=lambda r: str(r))
+        recipes_at_prev_level = sorted(self.base_recipes, key=lambda r: str(r))
 
         for i in range(1, n_expansion + 1):
             start_time = time.time()
-            newly_generated_recipes = self._generate_next_level(all_promising_recipes, recipes_at_prev_level)
-
-            if not newly_generated_recipes:
-                print(f"Level {i}: No new recipes generated. Stopping expansion.")
+            # setで生成するが、_run_sisに渡す前に必ずソート済みのリストにする
+            newly_generated_set = self._generate_next_level(set(all_promising_recipes), set(recipes_at_prev_level))
+            
+            if not newly_generated_set:
+                print(f"Level {i}: No new recipes. Stopping.")
                 break
 
-            # ★★★ executorを_run_sisに渡す ★★★
-            promising_new_recipes = self._run_sis(list(newly_generated_recipes), executor, y_target, k_per_level)
+            # ★★★ ここでソートすることで、SISの入力順序を固定 ★★★
+            newly_generated_list = sorted(list(newly_generated_set), key=lambda r: str(r))
+            
+            promising_new_recipes = self._run_sis(newly_generated_list, executor, y_target, k_per_level)
+            
+            # リストとして結合し、重複を除いて再ソート
+            combined = set(all_promising_recipes)
+            combined.update(promising_new_recipes)
+            all_promising_recipes = sorted(list(combined), key=lambda r: str(r))
+            
+            # 次のレベル用もソート
+            recipes_at_prev_level = sorted(promising_new_recipes, key=lambda r: str(r))
 
-            all_promising_recipes.update(promising_new_recipes)
-            recipes_at_prev_level = set(promising_new_recipes)
-
-            print(f"Level {i}: Generated {len(newly_generated_recipes)}, selected top {len(promising_new_recipes)}. Total promising: {len(all_promising_recipes)}. Time: {time.time() - start_time:.2f}s")
-
-        return list(all_promising_recipes)
+            print(f"Level {i}: Gen {len(newly_generated_set)}, Sel {len(promising_new_recipes)}. Total: {len(all_promising_recipes)}. Time: {time.time() - start_time:.2f}s")
+            
+        return all_promising_recipes
 
     def _generate_next_level(self, all_recipes: Set[FeatureRecipe], prev_level_recipes: Set[FeatureRecipe]) -> Set[FeatureRecipe]:
-        next_level_recipes: Set[FeatureRecipe] = set()
+        next_level = set()
         binary_ops = [op for op in self.operators.values() if isinstance(op, BinaryOperator)]
         unary_ops = [op for op in self.operators.values() if isinstance(op, UnaryOperator)]
+        
+        # 順序依存を避けるため、入力セットをリストにしてソートしてからループ
+        sorted_all = sorted(list(all_recipes), key=lambda r: str(r))
+        sorted_prev = sorted(list(prev_level_recipes), key=lambda r: str(r))
 
         for op in binary_ops:
-            for r1 in all_recipes:
-                for r2 in prev_level_recipes:
-                    if r1 != r2:
-                        next_level_recipes.add(FeatureRecipe(op=op, inputs=(r1, r2)))
+            for r1 in sorted_all:
+                for r2 in sorted_prev:
+                    if r1 != r2: next_level.add(FeatureRecipe(op=op, inputs=(r1, r2)))
         for op in unary_ops:
-            for r in prev_level_recipes:
-                next_level_recipes.add(FeatureRecipe(op=op, inputs=(r,)))
+            for r in sorted_prev:
+                next_level.add(FeatureRecipe(op=op, inputs=(r,)))
+        
+        return next_level - (all_recipes | prev_level_recipes)
 
-        return next_level_recipes - (all_recipes | prev_level_recipes)
-
-    # ★★★ シグネチャを変更し、NumPy/PyTorch両対応にする ★★★
     def _run_sis(self, recipes: List[FeatureRecipe], executor: Any, target: np.ndarray, k: int) -> List[FeatureRecipe]:
-        if not recipes:
-            return []
-
-        # バックエンド（NumPy/PyTorch）を判定
-        is_torch = "torch" in str(type(target))
-
+        if not recipes: return []
+        is_torch = 'torch' in str(type(target))
+        
         scores = []
         for recipe in recipes:
             array = executor.execute(recipe)
-
-            # NumPy/PyTorch共通の操作
-            if is_torch:
-                import torch
-
-                valid = ~torch.isnan(array) & ~torch.isnan(target)
-                if valid.sum() < 2:
-                    scores.append(0.0)
-                    continue
-                valid_f, valid_t = array[valid], target[valid]
-                mean, std = valid_f.mean(), valid_f.std()
-                if std > 1e-8:
-                    scores.append(torch.abs(torch.dot(valid_t - valid_t.mean(), (valid_f - mean) / std)).item())
-                else:
-                    scores.append(0.0)
-            else:  # NumPy
-                valid = ~np.isnan(array) & ~np.isnan(target)
-                if valid.sum() < 2:
-                    scores.append(0.0)
-                    continue
-                valid_f, valid_t = array[valid], target[valid]
-                mean, std = np.mean(valid_f), np.std(valid_f)
-                if std > 1e-8:
-                    scores.append(np.abs(np.dot(valid_t - np.mean(valid_t), (valid_f - mean) / std)))
-                else:
-                    scores.append(0.0)
-
-        return [recipes[i] for i in np.argsort(scores)[::-1][:k]]
+            # 警告抑制
+            with np.errstate(all='ignore'):
+                if is_torch:
+                    import torch
+                    valid = ~torch.isnan(array) & ~torch.isnan(target)
+                    if valid.sum() < 2: scores.append(0.0); continue
+                    vf, vt = array[valid], target[valid]
+                    mean, std = vf.mean(), vf.std()
+                    # ゼロ除算対策
+                    if std > 1e-9: scores.append(torch.abs(torch.dot(vt - vt.mean(), (vf - mean) / std)).item())
+                    else: scores.append(0.0)
+                else: # NumPy
+                    valid = ~np.isnan(array) & ~np.isnan(target) & ~np.isinf(array)
+                    if valid.sum() < 2: scores.append(0.0); continue
+                    vf, vt = array[valid], target[valid]
+                    mean, std = np.mean(vf), np.std(vf)
+                    if std > 1e-9: scores.append(np.abs(np.dot(vt - np.mean(vt), (vf - mean) / std)))
+                    else: scores.append(0.0)
+        
+        # ★★★ 決定論的ソート (重要) ★★★
+        # スコア(降順) -> レシピ文字列(昇順) でソートすることで、同点時の順序を固定
+        # これにより再現性が保証される
+        recipe_score_pairs = list(zip(recipes, scores))
+        recipe_score_pairs.sort(key=lambda x: (-x[1], str(x[0])))
+        
+        return [r for r, s in recipe_score_pairs[:k]]
