@@ -1,0 +1,17 @@
+[package]
+name = "mini-sisso"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "_mini_sisso_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Python連携
+pyo3 = { version = "0.23", features = ["extension-module"] }
+numpy = "0.23" 
+ndarray = "0.15"
+ndarray-linalg = { version = "0.16" }
+rayon = "1.8"
+itertools = "0.12"
