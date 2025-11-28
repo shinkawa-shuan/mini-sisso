@@ -1,327 +1,328 @@
 use pyo3::prelude::*;
-use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
-use ndarray::{Array1, Array2, Axis, s, ArrayView1, ArrayView2};
-use ndarray_linalg::Solve; // For OLS
+use numpy::{PyReadonlyArray1, PyReadonlyArray2};
+use ndarray::{Array1, Axis};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::cmp::Ordering;
+use nalgebra::{DMatrix, DVector}; // 外部BLAS不要の線形代数ライブラリ
 
-/// 安全な計算を行うヘルパー関数
-fn safe_eval(op: &str, data: &Array1<f64>) -> Option<Array1<f64>> {
-    match op {
-        "exp" => {
-            if data.iter().any(|&v| v > 700.0) { return None; }
-            Some(data.mapv(f64::exp))
-        },
-        "log" => {
-            if data.iter().any(|&v| v <= 1e-9) { return None; }
-            Some(data.mapv(f64::ln))
-        },
-        "inv" | "div" => {
-            if data.iter().any(|&v| v.abs() < 1e-9) { return None; }
-            Some(data.mapv(|v| 1.0 / v))
-        },
-        "sqrt" => {
-            if data.iter().any(|&v| v < 0.0) { return None; }
-            Some(data.mapv(f64::sqrt))
-        },
-        "cbrt" => Some(data.mapv(f64::cbrt)),
-        "abs" => Some(data.mapv(f64::abs)),
-        "sin" => Some(data.mapv(f64::sin)),
-        "cos" => Some(data.mapv(f64::cos)),
-        "pow2" => {
-             if data.iter().any(|&v| v.abs() > 1.34e154) { return None; }
-             Some(data.mapv(|v| v * v))
-        },
-        "pow3" => {
-            if data.iter().any(|&v| v.abs() > 5.64e102) { return None; }
-            Some(data.mapv(|v| v * v * v))
-        },
-        _ => Some(data.clone())
-    }
-}
-
-fn safe_binary_eval(op: &str, a: &Array1<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
-    match op {
-        "add" => Some(a + b),
-        "sub" => Some(a - b),
-        "mul" => {
-            let max_val = f64::MAX.sqrt();
-            if a.iter().zip(b.iter()).any(|(&x, &y)| x.abs() > max_val || y.abs() > max_val) {
-                 // simplified check
-            }
-            let res = a * b;
-            if res.iter().any(|&v| v.is_infinite() || v.is_nan()) { return None; }
-            Some(res)
-        },
-        "div" => {
-            if b.iter().any(|&v| v.abs() < 1e-9) { return None; }
-            Some(a / b)
-        },
-        _ => None
-    }
-}
-
+/// 特徴量構造体
 #[derive(Clone, Debug)]
 struct Feature {
     data: Array1<f64>,
     expr: String,
 }
 
-// Implement PartialEq and Eq for deterministic sorting based on expr
-impl PartialEq for Feature {
-    fn eq(&self, other: &Self) -> bool {
-        self.expr == other.expr
-    }
+// 安全な計算を行うヘルパー関数
+fn safe_unary_eval(op: &str, data: &Array1<f64>) -> Option<Array1<f64>> {
+    let res = match op {
+        "exp" => {
+            if data.iter().any(|&v| v > 700.0) { return None; }
+            data.mapv(f64::exp)
+        },
+        "log" => {
+            if data.iter().any(|&v| v.abs() <= 1e-9) { return None; }
+            data.mapv(|v| v.abs().ln()) // log(|x|)
+        },
+        "inv" => {
+            if data.iter().any(|&v| v.abs() <= 1e-9) { return None; }
+            data.mapv(|v| 1.0 / v)
+        },
+        "sqrt" => {
+             // sqrt(|x|) を採用してロバストにする
+            data.mapv(|v| v.abs().sqrt())
+        },
+        "sin" => data.mapv(f64::sin),
+        "cos" => data.mapv(f64::cos),
+        "pow2" => {
+             if data.iter().any(|&v| v.abs() > 1e150) { return None; }
+             data.mapv(|v| v * v)
+        },
+        "pow3" => {
+            if data.iter().any(|&v| v.abs() > 1e100) { return None; }
+            data.mapv(|v| v * v * v)
+        },
+        _ => return None
+    };
+    
+    if res.iter().any(|&v| v.is_nan() || v.is_infinite()) { return None; }
+    Some(res)
 }
-impl Eq for Feature {}
 
-fn generate_features(
-    base_features: &Array2<f64>,
-    base_names: &[String],
-    operators: &[String],
-    n_expansion: usize
-) -> Vec<Feature> {
-    let mut current_features: Vec<Feature> = base_features.axis_iter(Axis(1))
-        .zip(base_names.iter())
-        .map(|(col, name)| Feature {
-            data: col.to_owned(),
-            expr: name.clone(),
-        })
-        .collect();
+fn safe_binary_eval(op: &str, a: &Array1<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
+    let res = match op {
+        "add" => a + b,
+        "sub" => a - b,
+        "mul" => {
+            // 簡易オーバーフローチェック
+            if a.iter().zip(b.iter()).any(|(x, y)| x.abs() > 1e150 || y.abs() > 1e150) { return None; }
+            a * b
+        },
+        "div" => {
+            if b.iter().any(|&v| v.abs() < 1e-9) { return None; }
+            a / b
+        },
+        _ => return None
+    };
     
-    let mut seen_exprs: HashSet<String> = current_features.iter().map(|f| f.expr.clone()).collect();
-    
-    for _ in 0..n_expansion {
-        let mut new_features = Vec::new();
-        
-        // Unary
-        for feat in &current_features {
-            for op in operators {
-                if ["exp", "log", "inv", "sqrt", "cbrt", "abs", "sin", "cos", "pow2", "pow3"].contains(&op.as_str()) {
-                     if let Some(new_data) = safe_eval(op, &feat.data) {
-                         let new_expr = format!("{}({})", op, feat.expr);
-                         if !seen_exprs.contains(&new_expr) {
-                             new_features.push(Feature { data: new_data, expr: new_expr.clone() });
-                             seen_exprs.insert(new_expr);
-                         }
-                     }
-                }
-            }
-        }
-        
-        // Binary
-        let binary_ops: Vec<&String> = operators.iter().filter(|&op| ["add", "sub", "mul", "div"].contains(&op.as_str())).collect();
-        
-        if !binary_ops.is_empty() {
-             let generated: Vec<Feature> = current_features.par_iter().flat_map(|f1| {
-                 current_features.par_iter().flat_map(|f2| {
-                     let mut local_new = Vec::new();
-                     for op in &binary_ops {
-                         if ["add", "mul"].contains(&op.as_str()) && f1.expr > f2.expr { continue; }
-                         if f1.expr == f2.expr && ["sub", "div"].contains(&op.as_str()) { continue; }
-
-                         if let Some(new_data) = safe_binary_eval(op, &f1.data, &f2.data) {
-                             let new_expr = format!("{}({},{})", op, f1.expr, f2.expr);
-                             local_new.push(Feature { data: new_data, expr: new_expr });
-                         }
-                     }
-                     local_new
-                 })
-             }).collect();
-             
-             for f in generated {
-                 if !seen_exprs.contains(&f.expr) {
-                     seen_exprs.insert(f.expr.clone());
-                     new_features.push(f);
-                 }
-             }
-        }
-        current_features.extend(new_features);
-    }
-    current_features
+    if res.iter().any(|&v| v.is_nan() || v.is_infinite()) { return None; }
+    Some(res)
 }
 
 /// SIS (Sure Independence Screening)
-/// Returns top k features correlated with residual
+/// 残差との相関が高い上位k個の特徴を返す
 fn perform_sis(
     candidates: &[Feature],
     residual: &Array1<f64>,
     k: usize
 ) -> Vec<Feature> {
+    if candidates.is_empty() { return Vec::new(); }
+
+    let r_mean = residual.mean().unwrap_or(0.0);
+    let r_centered = residual - r_mean;
+    let r_norm = r_centered.dot(&r_centered).sqrt();
+
+    // 並列処理でスコア計算
     let mut scored_features: Vec<(&Feature, f64)> = candidates.par_iter().map(|f| {
-        // Pearson correlation
-        // corr(f, r) = cov(f, r) / (std(f) * std(r))
-        // We only need to rank, so we can ignore std(r) which is constant.
-        // score = |cov(f, r) / std(f)|
-        
         let f_mean = f.data.mean().unwrap_or(0.0);
-        let r_mean = residual.mean().unwrap_or(0.0);
-        
         let f_centered = &f.data - f_mean;
-        let r_centered = residual - r_mean;
+        let f_norm = f_centered.dot(&f_centered).sqrt();
         
-        let num = f_centered.dot(&r_centered);
-        let den = f_centered.dot(&f_centered).sqrt();
-        
-        let score = if den > 1e-9 {
-            (num / den).abs()
+        let score = if f_norm > 1e-9 && r_norm > 1e-9 {
+            (f_centered.dot(&r_centered) / (f_norm * r_norm)).abs()
         } else {
             0.0
         };
-        
         (f, score)
     }).collect();
     
-    // Sort by score descending, then by expr string for determinism
+    // 決定論的なソート (スコア降順 -> 式の文字列昇順)
     scored_features.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal) // Score desc
-            .then_with(|| a.0.expr.cmp(&b.0.expr))       // Expr asc (tie-breaker)
+        b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal)
+            .then_with(|| a.0.expr.cmp(&b.0.expr))
     });
     
+    // 上位k個を返す (クローン作成)
     scored_features.into_iter().take(k).map(|(f, _)| f.clone()).collect()
 }
 
-/// OLS Solver
-/// Returns RMSE and Coefficients
-fn solve_ols(features: &[&Feature], y: &Array1<f64>) -> (f64, Array1<f64>, f64) {
+/// OLS Solver using Nalgebra (BLAS-free)
+/// Returns (RMSE, Coefficients, Intercept)
+fn solve_ols_nalgebra(features: &[&Feature], y: &Array1<f64>) -> (f64, Vec<f64>, f64) {
     let n_samples = y.len();
     let n_features = features.len();
     
-    // Construct X matrix with intercept (column of 1s)
-    // Or just center X and y to avoid intercept in matrix
-    // Let's do centered OLS
+    // ndarray -> nalgebra DMatrix/DVector 変換
+    let y_vec = DVector::from_iterator(n_samples, y.iter().cloned());
     
-    let y_mean = y.mean().unwrap_or(0.0);
-    let y_centered = y - y_mean;
-    
-    let mut x_mat = Array2::<f64>::zeros((n_samples, n_features));
-    let mut x_means = Array1::<f64>::zeros(n_features);
-    let mut x_stds = Array1::<f64>::zeros(n_features);
-
+    // 特徴行列 X の構築
+    let mut x_mat = DMatrix::zeros(n_samples, n_features);
     for (j, f) in features.iter().enumerate() {
-        let f_mean = f.data.mean().unwrap_or(0.0);
-        let f_std = f.data.std(0.0);
-        x_means[j] = f_mean;
-        x_stds[j] = if f_std > 1e-9 { f_std } else { 1.0 };
-        
-        let col = (&f.data - f_mean) / x_stds[j];
-        x_mat.column_mut(j).assign(&col);
+        let col_vec = DVector::from_iterator(n_samples, f.data.iter().cloned());
+        x_mat.set_column(j, &col_vec);
     }
-    
-    // Solve (X^T X)^-1 X^T y
-    // Using ndarray-linalg's least_squares or solve
-    // Since X is centered and standardized, we are solving for standardized coefficients
-    
-    // Note: ndarray-linalg might need openblas. 
-    // If we want to avoid complex dependencies, we can use simple matrix inversion if dim is small (SISSO dim is usually small < 10)
-    
-    let xt = x_mat.t();
-    let xtx = xt.dot(&x_mat);
-    let xty = xt.dot(&y_centered);
-    
-    // Solve xtx * w = xty
-    match xtx.solve_into(xty) {
-        Ok(w) => {
-            // Calculate RMSE
-            let y_pred_centered = x_mat.dot(&w);
-            let residuals = &y_centered - &y_pred_centered;
-            let mse = residuals.dot(&residuals) / (n_samples as f64);
+
+    // 切片項 (バイアス) を追加して計算する場合
+    // ここでは特徴量データ自体を標準化せず、生データ+切片列で解くのが一般的で精度が良い
+    let x_with_intercept = x_mat.insert_column(n_features, 1.0); // 最後の列に1.0を追加
+
+    // SVDを使って解く (堅牢性が高い)
+    // (X^T X)^-1 X^T y よりも SVD のほうが数値的に安定
+    match x_with_intercept.clone().svd(true, true).solve(&y_vec, 1e-9) {
+        Ok(coeffs) => {
+            // coeffs の最後の要素が切片
+            let intercept = coeffs[n_features]; 
+            let real_coeffs: Vec<f64> = coeffs.iter().take(n_features).cloned().collect();
+
+            // RMSE計算
+            let y_pred = x_with_intercept * &coeffs;
+            let residuals = &y_vec - &y_pred;
+            let mse = residuals.norm_squared() / (n_samples as f64);
             let rmse = mse.sqrt();
-            
-            // Convert back to original coefficients
-            // y = y_mean + sum(w_j * (x_j - m_j)/s_j)
-            //   = (y_mean - sum(w_j * m_j / s_j)) + sum((w_j/s_j) * x_j)
-            
-            let real_coeffs = &w / &x_stds;
-            let intercept = y_mean - real_coeffs.dot(&x_means);
-            
+
             (rmse, real_coeffs, intercept)
         },
-        Err(_) => (f64::INFINITY, Array1::zeros(n_features), 0.0)
+        Err(_) => (f64::INFINITY, vec![0.0; n_features], 0.0)
     }
 }
 
 #[pyfunction]
 fn rust_fit_exhaustive(
-    py: Python,
+    _py: Python,
     features: PyReadonlyArray2<f64>,
     target: PyReadonlyArray1<f64>,
     feature_names: Vec<String>,
     operators: Vec<String>,
     n_expansion: usize,
     n_term: usize,
-    n_sis_features: usize,
-) -> PyResult<(f64, String, Vec<f64>, f64)> { // RMSE, Equation, Coeffs, Intercept
+    n_sis_features: usize, // k_per_levelに相当
+) -> PyResult<(f64, String, Vec<f64>, f64)> { 
     
     let x = features.as_array().to_owned();
     let y = target.as_array().to_owned();
     
-    // 1. Feature Generation
-    let all_features = generate_features(&x, &feature_names, &operators, n_expansion);
+    // 初期特徴量
+    let base_features: Vec<Feature> = x.axis_iter(Axis(1))
+        .zip(feature_names.iter())
+        .map(|(col, name)| Feature {
+            data: col.to_owned(),
+            expr: name.clone(),
+        })
+        .collect();
+
+    // --- レベルワイズ特徴生成 ---
+    // メモリ爆発を防ぐため、レベルごとに生成 -> SIS選抜 -> 次のレベルへ、を繰り返す
     
-    // 2. Iterative SIS + SO
-    let mut pool: Vec<Feature> = Vec::new();
-    let mut residual = y.clone();
-    let mut best_model_info = (f64::INFINITY, String::new(), Vec::new(), 0.0);
+    // 現在のレベルでの有望な特徴 (プール)
+    let mut current_level_pool = base_features.clone(); 
+    // 全期間を通じての有望な特徴 (最終的なSOの対象)
+    let mut all_promising_pool = base_features.clone();
+    // 生成済みの式のセット (重複排除用)
+    let mut seen_exprs: HashSet<String> = base_features.iter().map(|f| f.expr.clone()).collect();
+
+    let unary_ops: Vec<&String> = operators.iter().filter(|&op| !["add", "sub", "mul", "div"].contains(&op.as_str())).collect();
+    let binary_ops: Vec<&String> = operators.iter().filter(|&op| ["add", "sub", "mul", "div"].contains(&op.as_str())).collect();
+
+    for _level in 0..n_expansion {
+        let mut next_gen_candidates = Vec::new();
+
+        // 1. Unary (現プールに対して適用)
+        let unary_generated: Vec<Feature> = current_level_pool.par_iter().flat_map(|f| {
+            let mut local_res = Vec::new();
+            for op in &unary_ops {
+                if let Some(new_data) = safe_unary_eval(op, &f.data) {
+                     local_res.push(Feature { 
+                         data: new_data, 
+                         expr: format!("{}({})", op, f.expr) 
+                     });
+                }
+            }
+            local_res
+        }).collect();
+        next_gen_candidates.extend(unary_generated);
+
+        // 2. Binary (現プール x 全有望プール)
+        // これにより、過去のレベルの特徴とも演算できる
+        if !binary_ops.is_empty() {
+            let binary_generated: Vec<Feature> = current_level_pool.par_iter().flat_map_iter(|f1| {
+                all_promising_pool.iter().flat_map(|f2| {
+                    let mut local_res = Vec::new();
+                    for op in &binary_ops {
+                        // 順序の正規化 (a+b == b+a)
+                        if ["add", "mul"].contains(&op.as_str()) && f1.expr > f2.expr { continue; }
+                        if f1.expr == f2.expr && ["sub", "div"].contains(&op.as_str()) { continue; } // 自己演算の無駄排除
+
+                        if let Some(new_data) = safe_binary_eval(op, &f1.data, &f2.data) {
+                            local_res.push(Feature {
+                                data: new_data,
+                                expr: format!("({}{}{})", f1.expr, op_symbol(op), f2.expr) // e.g. (a+b)
+                            });
+                        }
+                    }
+                    local_res
+                })
+            }).collect();
+            next_gen_candidates.extend(binary_generated);
+        }
+
+        // 3. 重複排除
+        let unique_candidates: Vec<Feature> = next_gen_candidates.into_iter()
+            .filter(|f| seen_exprs.insert(f.expr.clone())) // 新規ならtrue
+            .collect();
+
+        if unique_candidates.is_empty() { break; }
+
+        // 4. SIS (選抜)
+        // ここで残差ではなく、ターゲットyとの相関を見る (Level-wise SISの仕様)
+        let selected_features = perform_sis(&unique_candidates, &y, n_sis_features);
+        
+        // 5. プール更新
+        current_level_pool = selected_features.clone();
+        all_promising_pool.extend(selected_features);
+    }
+
+    // --- SO (Exhaustive Search) ---
+    // all_promising_pool から n_term 個の組み合わせを探す
+    // 再現性のため、ここでもソートしておく
+    all_promising_pool.sort_by(|a, b| a.expr.cmp(&b.expr));
+
+    let mut best_global_rmse = f64::INFINITY;
+    let mut best_global_model = (String::new(), Vec::new(), 0.0);
+
+    // n_term=1から順に探索し、残差を更新していくのが本来のSISSOだが、
+    // ここでは単純化のため、指定されたn_termまでの全組み合わせを一気に探索する実装にする
+    // (あるいはPython側の実装に合わせて、ループごとにSISを入れるか？
+    //  Python版は `fit` 内でループしている。Rust版は `rust_fit_exhaustive` が一括で呼ばれる想定)
     
-    // We need to track which features are already in pool to avoid duplicates?
-    // perform_sis returns features.
-    
-    for d in 1..=n_term {
-        // SIS
-        // Filter out features already in pool? 
-        // Original code: [r for r in self.all_recipes if r not in pool]
-        // We can do this by expr check
-        let pool_exprs: HashSet<String> = pool.iter().map(|f| f.expr.clone()).collect();
-        let candidates: Vec<Feature> = all_features.iter()
+    // Python版の挙動（反復SIS）をRust内で再現する
+    let mut current_residual = y.clone();
+    let mut final_model_pool: Vec<Feature> = Vec::new();
+
+    for _term_idx in 1..=n_term {
+        // 反復SIS: 現在の残差に対して相関が高いものを全プールから選ぶ
+        // (all_promising_poolは既に生成済みなので、そこから選ぶ)
+        
+        // 既に選ばれた特徴を除外
+        let pool_exprs: HashSet<String> = final_model_pool.iter().map(|f| f.expr.clone()).collect();
+        let candidates: Vec<Feature> = all_promising_pool.iter()
             .filter(|f| !pool_exprs.contains(&f.expr))
             .cloned()
             .collect();
             
-        let top_k = perform_sis(&candidates, &residual, n_sis_features);
-        pool.extend(top_k);
+        let top_k = perform_sis(&candidates, &current_residual, n_sis_features);
+        final_model_pool.extend(top_k);
         
-        // SO (Combinations)
-        // Use itertools to generate combinations, then par_bridge for parallel processing
+        // SO: 組み合わせ探索
         use itertools::Itertools;
         
-        let (rmse, coeffs, intercept, features) = pool.iter()
-            .combinations(d)
-            .par_bridge() 
+        let best_in_term_opt = final_model_pool.iter()
+            .combinations(_term_idx)
+            .par_bridge()
             .map(|combo| {
-                let (rmse, coeffs, intercept) = solve_ols(&combo, &y);
+                let (rmse, coeffs, intercept) = solve_ols_nalgebra(&combo, &y);
                 (rmse, coeffs, intercept, combo)
             })
-            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal))
-            .unwrap();
-            
-        // Update residual
-        // y_pred = intercept + sum(c * f)
-        let mut y_pred = Array1::from_elem(y.len(), intercept);
-        for (i, f) in features.iter().enumerate() {
-            y_pred = y_pred + &f.data * coeffs[i];
+            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+
+        if let Some((rmse, coeffs, intercept, features)) = best_in_term_opt {
+            // 残差更新
+            let mut y_pred = Array1::from_elem(y.len(), intercept);
+            for (i, f) in features.iter().enumerate() {
+                y_pred = y_pred + &f.data * coeffs[i];
+            }
+            current_residual = &y - &y_pred;
+
+            // 式の文字列化
+            let mut eq_parts = Vec::new();
+            for (i, f) in features.iter().enumerate() {
+                eq_parts.push(format!("{:.6} * {}", coeffs[i], f.expr));
+            }
+            let eq_str = format!("{} + {:.6}", eq_parts.join(" + "), intercept);
+
+            // グローバルベストの更新 (項数が増えてもRMSEが下がらなければ更新しない)
+            if rmse < best_global_rmse {
+                best_global_rmse = rmse;
+                best_global_model = (eq_str, coeffs, intercept);
+            }
         }
-        residual = &y - &y_pred;
-        
-        // Format equation
-        // Format equation
-        let mut eq_parts = Vec::new();
-        for (i, f) in features.iter().enumerate() {
-            let val: f64 = coeffs[i];
-            eq_parts.push(format!("{:.6} * {}", val, f.expr));
-        }
-        let intercept_val: f64 = intercept;
-        let eq_str = format!("{} + {:.6}", eq_parts.join(" + "), intercept_val);
-        
-        best_model_info = (rmse, eq_str, coeffs.to_vec(), intercept);
     }
-    
-    Ok(best_model_info)
+
+    Ok((best_global_rmse, best_global_model.0, best_global_model.1, best_global_model.2))
+}
+
+// 演算子の記号変換
+fn op_symbol(op: &str) -> &str {
+    match op {
+        "add" => "+",
+        "sub" => "-",
+        "mul" => "*",
+        "div" => "/",
+        _ => op
+    }
 }
 
 #[pymodule]
-fn _mini_sisso_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _mini_sisso_rs(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(test_rust_connection, m)?)?;
     m.add_function(wrap_pyfunction!(rust_fit_exhaustive, m)?)?;
     Ok(())
@@ -329,7 +330,7 @@ fn _mini_sisso_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 #[pyfunction]
 fn test_rust_connection<'py>(
-    py: Python<'py>,
+    _py: Python<'py>,
     x: PyReadonlyArray2<'py, f64>,
     y: PyReadonlyArray1<'py, f64>,
 ) -> PyResult<(usize, f64)> {

@@ -32,13 +32,18 @@ class SissoRegressorTorch:
         self.best_models: Dict[int, dict] = {}
 
     def _parse_selection_params(self, params: dict) -> dict:
+        """ユーザーからのパラメータを解析し、デフォルト値を設定する"""
         if params is None:
             params = {}
+        # exhaustive
         params.setdefault("n_term", 2)
         params.setdefault("n_sis_features", 10)
+        # lasso
         params.setdefault("alpha", 0.01)
+        # lightgbm
         params.setdefault("n_features_to_select", 40)
         params.setdefault("lightgbm_params", {"random_state": 42, "n_jobs": -1, "verbosity": -1})
+        # filters
         params.setdefault("n_global_sis_features", None)
         params.setdefault("collinearity_filter", None)
         params.setdefault("collinearity_threshold", 0.9)
@@ -100,6 +105,7 @@ class SissoRegressorTorch:
         if not recipes_list:
             return float("inf"), None, None, None
         n_terms, n_samples = len(recipes_list), self.y.shape[0]
+        # Shape (1, n_samples, n_terms) for batch processing compat
         X_batch = torch.stack([self.executor.execute(r) for r in recipes_list], dim=1).unsqueeze(0)
 
         for j in range(n_terms):
@@ -130,6 +136,7 @@ class SissoRegressorTorch:
         if params["n_global_sis_features"]:
             print(f"Performing Global SIS, selecting top {params['n_global_sis_features']} features...")
             candidate_recipes = self._run_sis(self.y_centered, candidate_recipes, k=params["n_global_sis_features"])
+
         if params["collinearity_filter"]:
             candidate_recipes = self._filter_collinear_features(candidate_recipes, params["collinearity_filter"], params["collinearity_threshold"])
 
@@ -148,6 +155,8 @@ class SissoRegressorTorch:
         if not X_candidates:
             print(f"No valid features for {method}.")
             return
+
+        # Convert to NumPy for sklearn/lightgbm
         X_matrix = torch.stack(X_candidates, dim=1).cpu().numpy()
         y_np = self.y_centered.cpu().numpy()
 
@@ -192,11 +201,12 @@ class SissoRegressorTorch:
                 pool.extend(top_k)
                 print(f"SIS selected {len(top_k)} new features. Pool size: {len(pool)}")
 
-                # Note: The original batch-processing SO for torch is omitted for simplicity here.
-                # A full implementation would batch the 'combinations' list.
                 combos = list(combinations(pool, i))
                 print(f"--- Running SO for {i}-term models. Total combinations: {len(combos)} ---")
+
                 best_rmse, best_model = float("inf"), None
+                
+                # Simple loop for SO (batch processing could be implemented for further speedup)
                 for combo in combos:
                     rmse, recipes, coeffs, intercept = self._get_final_model_torch(list(combo))
                     if rmse < best_rmse:
@@ -204,8 +214,11 @@ class SissoRegressorTorch:
 
                 if best_model:
                     self.best_models[i] = {"rmse": best_rmse, "recipes": best_model["r"], "coeffs": best_model["c"], "intercept": best_model["i"]}
-                    y_pred = best_model["i"] + torch.sum(best_model["c"].flatten() * torch.stack([torch.nan_to_num(self.executor.execute(r)) for r in best_model["r"]], dim=1), dim=1)
+                    
+                    # Calculate y_pred for residual update
+                    y_pred = intercept + torch.sum(best_model["c"].flatten() * torch.stack([torch.nan_to_num(self.executor.execute(r)) for r in best_model["r"]], dim=1), dim=1)
                     residual = self.y - y_pred
+                    
                     print(f"Best {i}-term model: RMSE={best_rmse:.6f}, Eq: {self._format_equation(best_model['r'], best_model['c'], best_model['i'])}")
                 else:
                     print(f"No valid model found for term {i}.")

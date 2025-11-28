@@ -1,0 +1,14 @@
+/Users/sh-shuan/Developer/study/mini-sisso/target/release/deps/serde-47c672f6c1f21e68.d: /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/sh-shuan/Developer/study/mini-sisso/target/release/build/serde-e3350cd839304a59/out/private.rs
+
+/Users/sh-shuan/Developer/study/mini-sisso/target/release/deps/libserde-47c672f6c1f21e68.rlib: /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/sh-shuan/Developer/study/mini-sisso/target/release/build/serde-e3350cd839304a59/out/private.rs
+
+/Users/sh-shuan/Developer/study/mini-sisso/target/release/deps/libserde-47c672f6c1f21e68.rmeta: /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/sh-shuan/Developer/study/mini-sisso/target/release/build/serde-e3350cd839304a59/out/private.rs
+
+/Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/sh-shuan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/sh-shuan/Developer/study/mini-sisso/target/release/build/serde-e3350cd839304a59/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/sh-shuan/Developer/study/mini-sisso/target/release/build/serde-e3350cd839304a59/out
