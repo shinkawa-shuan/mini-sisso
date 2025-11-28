@@ -23,6 +23,26 @@ class FeatureRecipe:
     def __repr__(self):
         return self.op.format_string(self.inputs, self.base_feature_index, self.base_feature_names)
 
+    @classmethod
+    def from_structure(cls, structure, operators_dict):
+        """
+        Rustから返された構造化データ(tuple/int)からFeatureRecipeを復元する
+        structure例: ('sin', ('add', 0, 1))
+        """
+        # Base case: インデックス（整数）の場合
+        if isinstance(structure, int):
+            return cls(op=operators_dict['base'], base_feature_index=structure)
+        
+        # Recursive case: タプルの場合 (op_name, child) or (op_name, left, right)
+        op_name = structure[0]
+        op = operators_dict[op_name]
+        
+        inputs = []
+        for child_structure in structure[1:]:
+            inputs.append(cls.from_structure(child_structure, operators_dict))
+            
+        return cls(op=op, inputs=tuple(inputs))
+
 
 class Operator:
     def __init__(self, name: str, np_func: Callable, is_commutative: bool = False):

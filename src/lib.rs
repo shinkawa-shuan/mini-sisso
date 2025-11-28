@@ -6,11 +6,31 @@ use std::collections::HashSet;
 use std::cmp::Ordering;
 use nalgebra::{DMatrix, DVector}; // 外部BLAS不要の線形代数ライブラリ
 
+// 再帰的なレシピ構造を定義
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Recipe {
+    Base(usize), // ベース特徴量のインデックス
+    Unary(String, Box<Recipe>), // 演算子, 子
+    Binary(String, Box<Recipe>, Box<Recipe>), // 演算子, 左, 右
+}
+
+// Pythonオブジェクト（タプル）へ変換するメソッド
+impl Recipe {
+    fn to_py_object(&self, py: Python) -> PyObject {
+        match self {
+            Recipe::Base(idx) => idx.into_pyobject(py).unwrap().into_any().unbind(),
+            Recipe::Unary(op, child) => (op, child.to_py_object(py)).into_pyobject(py).unwrap().into_any().unbind(),
+            Recipe::Binary(op, left, right) => (op, left.to_py_object(py), right.to_py_object(py)).into_pyobject(py).unwrap().into_any().unbind(),
+        }
+    }
+}
+
 /// 特徴量構造体
 #[derive(Clone, Debug)]
 struct Feature {
     data: Array1<f64>,
     expr: String,
+    recipe: Recipe, // ★追加: 構造化データ
 }
 
 // 安全な計算を行うヘルパー関数
@@ -175,7 +195,7 @@ fn rust_fit_exhaustive(
     n_expansion: usize,
     n_term: usize,
     n_sis_features: usize, // k_per_levelに相当
-) -> PyResult<(f64, String, Vec<f64>, f64)> { 
+) -> PyResult<(f64, String, Vec<f64>, f64, Vec<PyObject>)> { 
     
     let x = features.as_array().to_owned();
     let y = target.as_array().to_owned();
@@ -186,6 +206,7 @@ fn rust_fit_exhaustive(
         .map(|(col, name)| Feature {
             data: col.to_owned(),
             expr: name.clone(),
+            recipe: Recipe::Base(feature_names.iter().position(|x| x == name).unwrap_or(0)),
         })
         .collect();
 
@@ -204,9 +225,12 @@ fn rust_fit_exhaustive(
             let mut local_res = Vec::new();
             for op in &unary_ops {
                 if let Some(new_data) = safe_unary_eval(op, &f.data) {
+                     let new_expr = format!("{}({})", op, f.expr);
+                     let new_recipe = Recipe::Unary(op.to_string(), Box::new(f.recipe.clone()));
                      local_res.push(Feature { 
                          data: new_data, 
-                         expr: format!("{}({})", op, f.expr) 
+                         expr: new_expr,
+                         recipe: new_recipe
                      });
                 }
             }
@@ -226,9 +250,16 @@ fn rust_fit_exhaustive(
                         if f1.expr == f2.expr && ["sub", "div"].contains(&op.as_str()) { continue; }
 
                         if let Some(new_data) = safe_binary_eval(op, &f1.data, &f2.data) {
+                            let new_expr = format!("({}{}{})", f1.expr, op_symbol(op), f2.expr);
+                            let new_recipe = Recipe::Binary(
+                                op_symbol(op).to_string(), 
+                                Box::new(f1.recipe.clone()), 
+                                Box::new(f2.recipe.clone())
+                            );
                             local_res.push(Feature {
                                 data: new_data,
-                                expr: format!("({}{}{})", f1.expr, op_symbol(op), f2.expr) 
+                                expr: new_expr,
+                                recipe: new_recipe
                             });
                         }
                     }
@@ -254,7 +285,7 @@ fn rust_fit_exhaustive(
     all_promising_pool.sort_by(|a, b| a.expr.cmp(&b.expr));
 
     let mut best_global_rmse = f64::INFINITY;
-    let mut best_global_model = (String::new(), Vec::new(), 0.0);
+    let mut best_global_model = (String::new(), Vec::new(), 0.0, Vec::new());
 
     let mut current_residual = y.clone();
     let mut final_model_pool: Vec<Feature> = Vec::new();
@@ -297,12 +328,27 @@ fn rust_fit_exhaustive(
 
             if rmse < best_global_rmse {
                 best_global_rmse = rmse;
-                best_global_model = (eq_str, coeffs, intercept);
+                let selected_recipes = features.iter().map(|f| f.recipe.clone()).collect();
+                best_global_model = (eq_str, coeffs, intercept, selected_recipes);
             }
         }
     }
 
-    Ok((best_global_rmse, best_global_model.0, best_global_model.1, best_global_model.2))
+    // PythonのGILを取得してオブジェクト変換
+    return Python::with_gil(|py| {
+        let mut selected_recipes_py = Vec::new();
+        for r in &best_global_model.3 { 
+            selected_recipes_py.push(r.to_py_object(py));
+        }
+
+        Ok((
+            best_global_rmse, 
+            best_global_model.0, 
+            best_global_model.1, 
+            best_global_model.2, 
+            selected_recipes_py
+        ))
+    });
 }
 
 // 演算子の記号変換

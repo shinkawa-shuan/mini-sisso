@@ -45,7 +45,7 @@ class MiniSisso(BaseEstimator, RegressorMixin):
         if self.so_method == 'exhaustive' and RUST_AVAILABLE:
             print("Using Rust backend for exhaustive search...")
             try:
-                rmse, eq, coeffs, intercept = _mini_sisso_rs.rust_fit_exhaustive(
+                rmse, eq, coeffs, intercept, feature_structures = _mini_sisso_rs.rust_fit_exhaustive(
                     X_arr, y_arr, self.base_feature_names_, 
                     self.operators or list(operators_dict.keys()), # Pass operators list
                     self.n_expansion, self.selection_params['n_term'], 
@@ -55,16 +55,11 @@ class MiniSisso(BaseEstimator, RegressorMixin):
                 self.equation_ = eq
                 self.coef_ = np.array(coeffs)
                 self.intercept_ = intercept
-                self.best_model_recipes_ = [] # Rust doesn't return recipes objects yet, need to handle this if predict needs them.
-                # Actually predict needs recipes.
-                # But for now let's just print the result.
-                # To support predict, we need to parse the equation or return recipes from Rust.
-                # Returning recipes from Rust is hard because they are Python objects.
-                # We can return the expression strings and reconstruct recipes?
-                # Or just rely on the equation string for now?
-                # The original predict uses `best_model_recipes_`.
-                # If we want to support predict, we need to reconstruct recipes.
-                # For now, let's just set result to None to skip the python printing block and print our own.
+                
+                self.best_model_recipes_ = [
+                    FeatureRecipe.from_structure(struct, operators_dict) 
+                    for struct in feature_structures
+                ]
                 
                 print(f"\nBest Model Found (Rust):\n  RMSE: {self.rmse_:.6f}\n  Equation: {self.equation_}")
                 result = None 
