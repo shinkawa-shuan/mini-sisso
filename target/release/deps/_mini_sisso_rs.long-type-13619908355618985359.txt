@@ -1,2 +1,0 @@
-std::iter::FlatMap<std::slice::Iter<'_, Feature>, Vec<Feature>, {closure@src/lib.rs:209:52: 209:56}>
-std::iter::FlatMap<std::slice::Iter<'_, Feature>, Vec<Feature>, {closure@src/lib.rs:209:52: 209:56}>: IntoParallelIterator
