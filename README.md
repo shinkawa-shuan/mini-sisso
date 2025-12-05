@@ -6,27 +6,22 @@
 
 **`mini-sisso` is a lightweight and user-friendly Python implementation of the SISSO (Sure Independence Screening and Sparsifying Operator) symbolic regression algorithm. It offers full compatibility with the scikit-learn ecosystem for discovering interpretable mathematical models from data.**
 
-### Why `mini-sisso` over the original SISSO?
+Inheriting the advanced exploration capabilities of the original C++/Fortran-based implementation, `mini-sisso` provides these features in a more modern and accessible package, powered by a **blazing-fast Rust backend**:
 
-`mini-sisso` provides the advanced search capabilities of the original C++/Fortran implementation in a more modern and accessible package.
-
+-   **🚀 Easy Adoption**: Simple `pip install`. The default CPU version has minimal dependencies (NumPy/SciPy), ensuring a hassle-free setup.
+-   **🦀 High-Performance Rust Backend**:
+    -   The computationally intensive `exhaustive` search is implemented in **Rust**, delivering performance far superior to pure Python implementations while remaining completely transparent to the user.
 -   **🧠 Memory Efficiency & Fast Exploration**:
-    -   **"Recipe-based" Architecture**: Dramatically reduces memory consumption during feature expansion, allowing it to handle large-scale problems that would crash the original implementation.
-    -   **"Level-wise SIS" Feature**: Significantly speeds up the search by pruning unpromising features early.
--   **🚀 Easy Adoption and Use**:
-    -   Simple `pip install` with no complex compilation required.
-    -   Intuitive `scikit-learn`-like `fit()` / `predict()` interface for easy model building and evaluation.
--   **🤝 Full `scikit-learn` Ecosystem Compatibility**:
-    -   Seamlessly integrates with powerful tools like `GridSearchCV` for automated hyperparameter tuning and `Pipeline` for building workflows.
--   **⚡ Flexible Search Strategies & GPU Support**:
-    -   In addition to the classic `exhaustive` search, it supports fast feature selectors like `Lasso` and `LightGBM`.
-    -   Offers optional GPU acceleration for further speedups.
+    -   A "recipe-based" architecture dramatically reduces memory consumption during Feature Expansion.
+    -   The "Level-wise SIS" feature (toggleable) speeds up exploration by pruning unpromising features early.
+-   **🤝 Full `scikit-learn` Compatibility**: Seamlessly integrates with powerful tools like `GridSearchCV` and `Pipeline`, in addition to the standard `fit()`/`predict()` interface.
+-   **⚡ Optional GPU Support**: Achieve significant speedups with GPU acceleration by installing the optional PyTorch backend.
 
 ## 📥 Installation
 
 ### CPU Version (Default, Recommended)
 
-Installs the CPU version from PyPI. Depends on NumPy, SciPy, scikit-learn, LightGBM, and dcor.
+Installs the lightweight CPU version from PyPI. It includes the optimized Rust backend.
 
 ```bash
 pip install mini-sisso
@@ -49,17 +44,17 @@ import pandas as pd
 import numpy as np
 from mini_sisso.model import MiniSisso
 
-# 1. Prepare Data
+# 1. Prepare data
 np.random.seed(42) # Set seed for reproducibility
-X_df = pd.DataFrame(np.random.rand(100, 2) *, columns=["feature_A", "feature_B"])
+X_df = pd.DataFrame(np.random.rand(100, 2) * [2, 3], columns=["feature_A", "feature_B"])
 # True equation: y = 2*sin(feature_A) + feature_B^2 + noise
 y_series = pd.Series(2 * np.sin(X_df["feature_A"]) + X_df["feature_B"]**2 + np.random.randn(100) * 0.1)
 
-# 2. Instantiate the Model (with all hyperparameters shown)
-# Comment out the ones you don't need to use their default values.
+# 2. Instantiate the Model (Full Hyperparameter List)
+# Uncomment the parameters you need to change.
 model = MiniSisso(
     # --- Control the fundamental search space ---
-    n_expansion=2,                      # Depth of feature expansion (deeper finds more complex eqns but takes longer)
+    n_expansion=2,                      # Depth of feature expansion (deeper finds more complex equations)
     operators=["+", "sin", "pow2"],     # List of operators for feature expansion
     
     # --- Select the main search strategy ---
@@ -78,14 +73,14 @@ model = MiniSisso(
         # 'n_features_to_select': 20,   # Number of features to select with LightGBM
         # 'lightgbm_params': {'n_estimators': 100, 'random_state': 42}, # Parameters for the LightGBM model itself
         
-        # -- Preprocessing filters for "lasso"/"lightgbm" (optional) --
+        # -- Optional preprocessing filters for "lasso"/"lightgbm" --
         # 'n_global_sis_features': 200, # Number of candidates to pre-screen based on correlation with target
         # 'collinearity_filter': 'mi',  # Method to calculate correlation between candidates ('mi' or 'dcor')
         # 'collinearity_threshold': 0.9, # Correlation threshold for the above filter
     },
     
     # --- Control computational efficiency ---
-    use_levelwise_sis=True,             # Speed up with staged search (strongly recommended)
+    use_levelwise_sis=True,             # Use staged search for speed (strongly recommended)
     n_level_sis_features=50,            # Number of promising features to keep at each expansion level
     
     # --- Select the execution environment ---
@@ -93,20 +88,17 @@ model = MiniSisso(
 )
 
 # 3. Fit the model
-# Uses the same fit(X, y) interface as scikit-learn
 model.fit(X_df, y_series)
 
 # 4. Check the results
-# Access fitted attributes (ending with an underscore)
 print("\n--- Fit Results ---")
 print(f"Discovered Equation: {model.equation_}")
 print(f"Training RMSE: {model.rmse_:.4f}")
 print(f"Training R2 Score: {model.r2_:.4f}")
 
 # 5. Make predictions
-# Uses the same predict(X) interface as scikit-learn
-print("\n--- Predictions ---")
-X_test_df = pd.DataFrame(np.array([, ]), columns=["feature_A", "feature_B"])
+print("\n--- Prediction ---")
+X_test_df = pd.DataFrame(np.array([[0.5, 1.0], [1.0, 2.0]]), columns=["feature_A", "feature_B"])
 predictions = model.predict(X_test_df)
 print(f"Predictions for new data ([0.5, 1.0], [1.0, 2.0]): {predictions}")
 ```
@@ -150,7 +142,7 @@ The `mini-sisso` search process follows this workflow, with each step controlled
 
 ### Workflow Overview
 
-1.  **Feature Expansion**: Generates candidate features based on `operators` and `n_expansion`.
+1.  **Feature Expansion**: Generates a large number of candidate features based on `operators` and `n_expansion`.
     -   This process is made efficient by `use_levelwise_sis=True` and `n_level_sis_features`.
 2.  **[Optional] Preprocessing Filters**: A set of filters to prune candidate features when using `lasso` or `lightgbm`. (Configured in `selection_params`).
     -   **Global SIS**: Removes features with low correlation to the target `y`.
@@ -158,6 +150,7 @@ The `mini-sisso` search process follows this workflow, with each step controlled
 3.  **Model Search (Sparsifying Operator)**: The final model is discovered from the pruned candidates using the strategy specified by `so_method`.
 
 ---
+
 ### Main Hyperparameters
 
 #### `so_method`: The Three Model Search Strategies
@@ -165,7 +158,7 @@ The `mini-sisso` search process follows this workflow, with each step controlled
 The `so_method` parameter determines the core search approach.
 
 ##### 1. `so_method="exhaustive"` (Default)
-The classic SISSO approach. It uses iterative SIS and **exhaustive search** to find the optimal model. Best for finding simple, interpretable models.
+The classic SISSO approach. It uses iterative SIS and an **exhaustive search powered by Rust** to find the optimal model. Best for finding simple, interpretable models.
 
 ```python
 # Exhaustively search for models up to 3 terms
@@ -215,7 +208,8 @@ The `selection_params` dictionary allows you to apply preprocessing filters and 
 -   **`collinearity_filter`**: Removes highly correlated features to stabilize Lasso/LightGBM. Can be `'mi'` (Mutual Information) or `'dcor'` (Distance Correlation).
 
 ```python
-# Filter candidates with Global SIS and MI before running LightGBM
+# Before running LightGBM, pre-screen to the top 200 features,
+# then remove pairs with an MI score > 0.9
 model = MiniSisso(
     so_method='lightgbm',
     selection_params={
@@ -228,7 +222,8 @@ model = MiniSisso(
 ```
 
 ##### Expert Settings (for `lightgbm`)
-You can also pass internal hyperparameters directly to the LightGBM model.
+You can also directly specify the internal hyperparameters for `lightgbm`.
+
 ```python
 model = MiniSisso(
     so_method='lightgbm',
@@ -236,7 +231,7 @@ model = MiniSisso(
         'n_features_to_select': 20,
         'lightgbm_params': {
             'n_estimators': 200,         # Number of trees
-            'num_leaves': 40,            # Max number of leaves in one tree
+            'num_leaves': 31,            # Max number of leaves in one tree
             'learning_rate': 0.05,       # Learning rate
             'colsample_bytree': 0.8,     # Fraction of features to be considered for each tree
             'subsample': 0.8,            # Fraction of data to be used for each tree
