@@ -56,6 +56,13 @@ class MiniSisso(BaseEstimator, RegressorMixin):
                 self.coef_ = np.array(coeffs)
                 self.intercept_ = intercept
                 
+                # Calculate R2
+                y_var = np.var(y_arr)
+                if y_var > 1e-12:
+                     self.r2_ = 1.0 - (self.rmse_ ** 2) / y_var
+                else:
+                     self.r2_ = 0.0
+                
                 self.best_model_recipes_ = [
                     FeatureRecipe.from_structure(struct, operators_dict) 
                     for struct in feature_structures
