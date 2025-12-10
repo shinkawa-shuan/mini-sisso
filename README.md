@@ -13,7 +13,9 @@ Inheriting the advanced exploration capabilities of the original C++/Fortran-bas
     -   The computationally intensive `exhaustive` search is implemented in **Rust**, delivering performance far superior to pure Python implementations while remaining completely transparent to the user.
 -   **🧠 Memory Efficiency & Fast Exploration**:
     -   A "recipe-based" architecture dramatically reduces memory consumption during Feature Expansion.
-    -   The "Level-wise SIS" feature (toggleable) speeds up exploration by pruning unpromising features early.
+    - The "Level-wise SIS" feature (toggleable) speeds up exploration by pruning unpromising features early.
+-   **⚖️ Balanced Feature Selection**:
+    -   Implements a **"Split Selection"** strategy during SIS. This ensures that unary operators (like `sin`, `exp`) are not "crowded out" by the overwhelming number of binary combinations, preserving feature diversity.
 -   **🤝 Full `scikit-learn` Compatibility**: Seamlessly integrates with powerful tools like `GridSearchCV` and `Pipeline`, in addition to the standard `fit()`/`predict()` interface.
 -   **⚡ Optional GPU Support**: Achieve significant speedups with GPU acceleration by installing the optional PyTorch backend.
 
@@ -269,6 +271,10 @@ Specify the `operators` argument as a list of strings.
 | `'pow2'` | Square (a^2)              |
 | `'pow3'` | Cube (a^3)                |
 | `'inv'`  | Reciprocal (1/a)          |
+| `'\|-\|'` | Absolute difference (\|a - b\|) |
+| `'cbrt'` | Cube root (a^(1/3)) |
+| `'abs'` | Absolute value (\|a\|) |
+| `'scd'` | Standard Cauchy Distribution (1 / (π * (1 + a^2))) |
 
 ## 🤝 `scikit-learn` Ecosystem Integration
 `mini-sisso` inherits `BaseEstimator` and `RegressorMixin` from `scikit-learn`, allowing it to seamlessly integrate with the powerful tools provided by `scikit-learn`.
