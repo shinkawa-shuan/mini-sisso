@@ -72,16 +72,23 @@ class BaseFeatureOperator(Operator):
 # PyTorch関数をNumPy関数に置き換え
 OPERATORS = {
     "base": BaseFeatureOperator("base", lambda x: x),
+    # Binary (二項演算子)
     "+": BinaryOperator("+", np.add, is_commutative=True),
     "-": BinaryOperator("-", np.subtract),
     "*": BinaryOperator("*", np.multiply, is_commutative=True),
     "/": BinaryOperator("/", np.divide),
+    "|-|": BinaryOperator("|-|", lambda a, b: np.abs(np.subtract(a, b)), is_commutative=True), # 絶対差を追加
+    
+    # Unary (単項演算子)
     "exp": UnaryOperator("exp", np.exp),
     "log": UnaryOperator("log", np.log),
     "sin": UnaryOperator("sin", np.sin),
     "cos": UnaryOperator("cos", np.cos),
     "sqrt": UnaryOperator("sqrt", lambda x: np.sqrt(np.abs(x))),
+    "cbrt": UnaryOperator("cbrt", lambda x: np.cbrt(x)), # 立方根を追加
+    "abs": UnaryOperator("abs", np.abs), # 絶対値を追加
     "pow2": UnaryOperator("^2", lambda x: np.power(x, 2)),
     "pow3": UnaryOperator("^3", lambda x: np.power(x, 3)),
-    "inv": UnaryOperator("^-1", lambda x: 1.0 / x),  # np.reciprocalは整数型で0を返すため変更
+    "inv": UnaryOperator("^-1", lambda x: 1.0 / x),
+    "scd": UnaryOperator("scd", lambda x: 1.0 / (np.pi * (1 + x**2))), # 標準コーシー分布を追加
 }
