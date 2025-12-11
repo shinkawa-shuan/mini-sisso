@@ -127,7 +127,8 @@ fn perform_sis_lazy(
     candidates: &[Feature],
     base_data: &Array2<f64>,
     residual: &Array1<f64>,
-    k: usize
+    k: usize,
+    use_split_selection: bool
 ) -> Vec<Feature> {
     if candidates.is_empty() { return Vec::new(); }
 
@@ -163,6 +164,14 @@ fn perform_sis_lazy(
 
     // スコア降順ソート
     scored_indices.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+
+    // --- Branch Logic ---
+    if !use_split_selection {
+        // Traditional Top-K
+        return scored_indices.into_iter().take(k)
+            .map(|(i, _, _)| candidates[i].clone())
+            .collect();
+    }
 
     // 選抜ロジック: UnaryとBinaryで枠を分ける (Crowding Out対策)
     let k_split = k / 2 + 1; // それぞれ約半分ずつ
@@ -279,6 +288,7 @@ fn rust_fit_exhaustive(
     n_expansion: usize,
     n_term: usize,
     n_sis_features: usize,
+    use_split_selection: bool, // Added arg
 ) -> PyResult<(f64, String, Vec<f64>, f64, Vec<PyObject>)> { 
     
     let x_base = features.as_array().to_owned();
@@ -359,7 +369,7 @@ fn rust_fit_exhaustive(
         if unique_candidates.is_empty() { break; }
 
         // SIS スクリーニング (ここでのみデータを計算)
-        let selected_features = perform_sis_lazy(&unique_candidates, &x_base, &y, n_sis_features);
+        let selected_features = perform_sis_lazy(&unique_candidates, &x_base, &y, n_sis_features, use_split_selection);
         
         current_level_pool = selected_features.clone();
         all_promising_pool.extend(selected_features);
@@ -381,7 +391,7 @@ fn rust_fit_exhaustive(
             .cloned()
             .collect();
             
-        let top_k = perform_sis_lazy(&candidates, &x_base, &current_residual, n_sis_features);
+        let top_k = perform_sis_lazy(&candidates, &x_base, &current_residual, n_sis_features, use_split_selection);
         final_model_pool.extend(top_k);
         
         use itertools::Itertools;

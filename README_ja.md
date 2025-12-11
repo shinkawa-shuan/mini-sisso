@@ -85,6 +85,9 @@ model = MiniSisso(
     # --- 計算効率の制御 ---
     use_levelwise_sis=True,             # 段階的探索を使用して高速化 (強く推奨)
     n_level_sis_features=50,            # 各拡張レベルで保持する有望な特徴の数
+
+    # --- 特徴量選抜戦略 ---
+    use_split_selection=True,           # 単項・二項演算子の選抜バランスを調整 (推奨: True)
     
     # --- 実行環境の選択 ---
     # device="cuda",                      # GPUを使用する場合は 'cuda' を指定
@@ -237,6 +240,7 @@ model = MiniSisso(
 
 -   `use_levelwise_sis` (bool, default=True): **強く推奨します。** 特徴生成を高速化し、メモリを節約します。
 -   `n_level_sis_features` (int, default=50): `use_levelwise_sis=True` の場合に各ステージで保持する特徴の数。
+-   `use_split_selection` (bool, default=True): `True` の場合、SISの選抜時に単項演算子と二項演算子のバランスを確保し、単項演算子が埋もれる（Crowding out）のを防ぎます。すべての手法（`exhaustive`, `lasso`, `lightgbm`）で有効です。
 -   `device` (str, default="cpu"): GPUバックエンドを使用するには `"cuda"` に設定します。
 
 ### 利用可能な演算子
@@ -349,6 +353,7 @@ class MiniSisso(BaseEstimator, RegressorMixin):
     def __init__(self, n_expansion: int = 2, operators: list = None,
                  so_method: str = "exhaustive", selection_params: dict = None,
                  use_levelwise_sis: bool = True, n_level_sis_features: int = 50,
+                 use_split_selection: bool = True,
                  device: str = "cpu"):
 ```
 
@@ -359,6 +364,7 @@ class MiniSisso(BaseEstimator, RegressorMixin):
 -   `selection_params` (dict, optional): 選択された `so_method` と前処理フィルターのための詳細パラメータの辞書。
 -   `use_levelwise_sis` (bool, default=True): レベルワイズSIS機能を切り替えます。
 -   `n_level_sis_features` (int, default=50): `use_levelwise_sis=True` の場合に各レベルで保持する特徴の数。
+-   `use_split_selection` (bool, default=True): 演算子バランス選抜（Split Selection）戦略のON/OFFを切り替えます。
 -   `device` (str, default="cpu"): 計算デバイス (`"cpu"` または `"cuda"`).
 
 ---

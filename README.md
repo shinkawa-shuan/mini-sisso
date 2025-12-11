@@ -84,6 +84,9 @@ model = MiniSisso(
     # --- Control computational efficiency ---
     use_levelwise_sis=True,             # Use staged search for speed (strongly recommended)
     n_level_sis_features=50,            # Number of promising features to keep at each expansion level
+
+    # --- Feature Selection Strategy ---
+    use_split_selection=True,           # Balance selection between unary/binary operators (Recommended: True)
     
     # --- Select the execution environment ---
     # device="cuda",                      # Specify 'cuda' to use GPU
@@ -252,6 +255,7 @@ model = MiniSisso(
 
 -   `use_levelwise_sis` (bool, default=True): **Strongly recommended.** Speeds up feature generation and saves memory.
 -   `n_level_sis_features` (int, default=50): Number of features to keep at each stage when `use_levelwise_sis=True`.
+-   `use_split_selection` (bool, default=True): If `True`, ensures a balanced selection of unary and binary operators during SIS to prevent "crowding out." Applicable to all methods (`exhaustive`, `lasso`, `lightgbm`).
 -   `device` (str, default="cpu"): Set to `"cuda"` to use the GPU backend.
 
 ### Available Operators
@@ -364,6 +368,7 @@ class MiniSisso(BaseEstimator, RegressorMixin):
     def __init__(self, n_expansion: int = 2, operators: list = None,
                  so_method: str = "exhaustive", selection_params: dict = None,
                  use_levelwise_sis: bool = True, n_level_sis_features: int = 50,
+                 use_split_selection: bool = True,
                  device: str = "cpu"):
 ```
 
@@ -374,6 +379,7 @@ class MiniSisso(BaseEstimator, RegressorMixin):
 -   `selection_params` (dict, optional): Dictionary of detailed parameters for the selected `so_method` and preprocessing filters.
 -   `use_levelwise_sis` (bool, default=True): Toggles the level-wise SIS feature.
 -   `n_level_sis_features` (int, default=50): Number of features to keep at each level if `use_levelwise_sis=True`.
+-   `use_split_selection` (bool, default=True): Toggles the "Split Selection" strategy for balanced operator selection.
 -   `device` (str, default="cpu"): Computation device (`"cpu"` or `"cuda"`).
 
 ---

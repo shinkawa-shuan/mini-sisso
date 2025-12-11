@@ -25,11 +25,19 @@ except ImportError:
 
 
 class MiniSisso(BaseEstimator, RegressorMixin):
-    def __init__(self, n_expansion: int = 2, operators: list = None, so_method: str = "exhaustive", selection_params: dict = None, use_levelwise_sis: bool = True, n_level_sis_features: int = 50, device: str = "cpu"):
+    def __init__(self, n_expansion: int = 2, operators: list = None, 
+                 so_method: str = "exhaustive", selection_params: dict = None, 
+                 use_levelwise_sis: bool = True, n_level_sis_features: int = 50, 
+                 use_split_selection: bool = True,  # Added Parameter
+                 device: str = "cpu"):
 
-        self.n_expansion, self.operators, self.so_method = n_expansion, operators, so_method
+        self.n_expansion = n_expansion
+        self.operators = operators
+        self.so_method = so_method
         self.selection_params = selection_params
-        self.use_levelwise_sis, self.n_level_sis_features = use_levelwise_sis, n_level_sis_features
+        self.use_levelwise_sis = use_levelwise_sis
+        self.n_level_sis_features = n_level_sis_features
+        self.use_split_selection = use_split_selection # Store parameter
         self.device = device
 
         if self.device == "cuda" and not TORCH_AVAILABLE:
@@ -42,26 +50,25 @@ class MiniSisso(BaseEstimator, RegressorMixin):
         FeatureRecipe.base_feature_names = self.base_feature_names_
         operators_dict = {op: OPERATORS[op] for op in self.operators + ["base"] if op in OPERATORS} if self.operators else OPERATORS
 
+        # --- Rust Backend Execution ---
         if self.so_method == 'exhaustive' and RUST_AVAILABLE:
             print("Using Rust backend for exhaustive search...")
             try:
+                # Pass use_split_selection to Rust
                 rmse, eq, coeffs, intercept, feature_structures = _mini_sisso_rs.rust_fit_exhaustive(
                     X_arr, y_arr, self.base_feature_names_, 
-                    self.operators or list(operators_dict.keys()), # Pass operators list
-                    self.n_expansion, self.selection_params['n_term'], 
-                    self.selection_params['n_sis_features']
+                    self.operators or list(operators_dict.keys()),
+                    self.n_expansion, self.selection_params.get('n_term', 1), 
+                    self.selection_params.get('n_sis_features', 10),
+                    self.use_split_selection
                 )
                 self.rmse_ = rmse
                 self.equation_ = eq
                 self.coef_ = np.array(coeffs)
                 self.intercept_ = intercept
                 
-                # Calculate R2
                 y_var = np.var(y_arr)
-                if y_var > 1e-12:
-                     self.r2_ = 1.0 - (self.rmse_ ** 2) / y_var
-                else:
-                     self.r2_ = 0.0
+                self.r2_ = 1.0 - (self.rmse_ ** 2) / y_var if y_var > 1e-12 else 0.0
                 
                 self.best_model_recipes_ = [
                     FeatureRecipe.from_structure(struct, operators_dict) 
@@ -69,20 +76,20 @@ class MiniSisso(BaseEstimator, RegressorMixin):
                 ]
                 
                 print(f"\nBest Model Found (Rust):\n  RMSE: {self.rmse_:.6f}\n  Equation: {self.equation_}")
-                result = None 
+                return self
                 
             except Exception as e:
                 print(f"Rust execution failed: {e}. Falling back to Python.")
                 # Fallback code...
-                params = self.selection_params
-                # ... (rest of python code)
                 # To avoid duplicating code, we can just let it fall through if we didn't set result?
                 # But we need to skip the python execution if rust succeeded.
                 
         # If Rust succeeded, we are done.
-        if hasattr(self, "rmse_"):
-             return self
+        # This check is now redundant because `return self` is inside the try block.
+        # if hasattr(self, "rmse_"):
+        #      return self
 
+        # --- Python Backend Execution ---
         if self.device == "cuda":
             # ... (GPU backend switching logic)
             pass
@@ -93,14 +100,17 @@ class MiniSisso(BaseEstimator, RegressorMixin):
             X_fit, y_fit, ExecutorClass, RegressorClass = X_arr, y_arr, RecipeExecutor, SissoRegressorNumPy
 
         executor = ExecutorClass(X_fit)
-        generator = FeatureGenerator(self.base_feature_names_, operators_dict)
+        
+        # Pass use_split_selection to Generator
+        generator = FeatureGenerator(self.base_feature_names_, operators_dict, use_split_selection=self.use_split_selection)
 
         if self.use_levelwise_sis:
             recipes = generator.expand_with_levelwise_sis(self.n_expansion, self.n_level_sis_features, executor, y_fit)
         else:
             recipes = generator.expand_full(self.n_expansion)
 
-        regressor = RegressorClass(recipes, executor, y_fit, self.so_method, self.selection_params)
+        # Pass use_split_selection to Regressor
+        regressor = RegressorClass(recipes, executor, y_fit, self.so_method, self.selection_params, use_split_selection=self.use_split_selection)
         result = regressor.fit()
 
         print(f"\n{'='*50}\nSISSO fitting finished. Total time: {time.time() - start_time:.2f}s\n{'='*50}")
