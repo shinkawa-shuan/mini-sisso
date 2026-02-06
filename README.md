@@ -11,6 +11,7 @@ Inheriting the advanced exploration capabilities of the original C++/Fortran-bas
 -   **🚀 Easy Adoption**: Simple `pip install`. The default CPU version has minimal dependencies (NumPy/SciPy), ensuring a hassle-free setup.
 -   **🦀 High-Performance Rust Backend**:
     -   The computationally intensive `exhaustive` search is implemented in **Rust**, delivering performance far superior to pure Python implementations while remaining completely transparent to the user.
+    -   **Gram Matrix Pre-calculation**: Mathematically optimized the Ordinary Least Squares (OLS) calculation to eliminate dependence on the sample size $N$ within the search loop ($O(N k^2) \to O(k^3)$). This achieves massive speedups without any loss of accuracy.
 -   **🧠 Memory Efficiency & Fast Exploration**:
     -   A "recipe-based" architecture dramatically reduces memory consumption during Feature Expansion.
     - The "Level-wise SIS" feature (toggleable) speeds up exploration by pruning unpromising features early.
