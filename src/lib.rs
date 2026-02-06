@@ -206,77 +206,6 @@ fn perform_sis_lazy(
         .collect()
 }
 
-// --- OLS Solver ---
-fn solve_ols_nalgebra(features: &[&Feature], base_data: &Array2<f64>, y: &Array1<f64>) -> (f64, Vec<f64>, f64) {
-    let n_samples = y.len();
-    let n_features = features.len();
-    
-    // 選ばれた特徴量のデータを生成
-    let mut x_mat = DMatrix::zeros(n_samples, n_features);
-    let mut x_means = Vec::with_capacity(n_features);
-    let mut x_stds = Vec::with_capacity(n_features);
-    let mut valid_features = true;
-
-    for (j, f) in features.iter().enumerate() {
-        if let Some(data) = evaluate_recipe(&f.recipe, base_data) {
-            let mean = data.mean().unwrap_or(0.0);
-            let std = data.std(0.0);
-            let safe_std = if std > 1e-9 { std } else { 1.0 };
-            
-            x_means.push(mean);
-            x_stds.push(safe_std);
-            
-            for i in 0..n_samples {
-                x_mat[(i, j)] = (data[i] - mean) / safe_std;
-            }
-        } else {
-            valid_features = false;
-            break;
-        }
-    }
-
-    if !valid_features {
-        return (f64::INFINITY, vec![0.0; n_features], 0.0);
-    }
-    
-    let y_mean = y.mean().unwrap_or(0.0);
-    let y_centered: Vec<f64> = y.iter().map(|&v| v - y_mean).collect();
-    let y_vec = DVector::from_vec(y_centered);
-    
-    match x_mat.clone().svd(true, true).solve(&y_vec, 1e-9) {
-        Ok(coeffs_std) => {
-            let mut real_coeffs = Vec::with_capacity(n_features);
-            let mut intercept = y_mean;
-            
-            for j in 0..n_features {
-                let w = coeffs_std[j];
-                let s = x_stds[j];
-                let m = x_means[j];
-                
-                let c = w / s;
-                real_coeffs.push(c);
-                intercept -= c * m;
-            }
-            
-            // RMSE計算
-            let mut mse = 0.0;
-            for i in 0..n_samples {
-                let mut y_pred = intercept;
-                for j in 0..n_features {
-                    // 標準化マトリックスから値を再構成して予測
-                    let x_val = x_mat[(i, j)] * x_stds[j] + x_means[j];
-                    y_pred += real_coeffs[j] * x_val;
-                }
-                let diff = y[i] - y_pred;
-                mse += diff * diff;
-            }
-            let rmse = (mse / n_samples as f64).sqrt();
-
-            (rmse, real_coeffs, intercept)
-        },
-        Err(_) => (f64::INFINITY, vec![0.0; n_features], 0.0)
-    }
-}
 
 #[pyfunction]
 fn rust_fit_exhaustive(
@@ -288,13 +217,14 @@ fn rust_fit_exhaustive(
     n_expansion: usize,
     n_term: usize,
     n_sis_features: usize,
-    use_split_selection: bool, // Added arg
+    use_split_selection: bool,
 ) -> PyResult<(f64, String, Vec<f64>, f64, Vec<PyObject>)> { 
     
     let x_base = features.as_array().to_owned();
     let y = target.as_array().to_owned();
+    let y_mean = y.mean().unwrap_or(0.0);
+    let y_var = y.var(0.0);
     
-    // ベース特徴量 (データは持たない)
     let base_features: Vec<Feature> = feature_names.iter().enumerate()
         .map(|(i, name)| Feature {
             expr: name.clone(),
@@ -302,24 +232,21 @@ fn rust_fit_exhaustive(
         })
         .collect();
 
-    // --- 特徴量生成 (遅延評価) ---
     let mut current_level_pool = base_features.clone(); 
     let mut all_promising_pool = base_features.clone();
     let mut seen_exprs: HashSet<String> = base_features.iter().map(|f| f.expr.clone()).collect();
 
-    // 演算子名の不一致修正: Python側のシンボル (+, -) も認識するように修正
     let binary_symbols = ["+", "-", "*", "/", "|-|", "add", "sub", "mul", "div"];
     let unary_ops: Vec<&String> = operators.iter().filter(|&op| !binary_symbols.contains(&op.as_str())).collect();
     let binary_ops: Vec<&String> = operators.iter().filter(|&op| binary_symbols.contains(&op.as_str())).collect();
 
-    for _level in 0..n_expansion {
+    println!("***************** SISSO Feature Expansion (Rust) *****************");
+    for level in 1..=n_expansion {
         let mut next_gen_candidates = Vec::new();
 
-        // 1. 単項演算子の生成
         let unary_generated: Vec<Feature> = current_level_pool.par_iter().flat_map_iter(|f| {
             let mut local_res = Vec::new();
             for op in &unary_ops {
-                // 最適化: ここではデータを計算せず、レシピのみを作成する
                 let new_expr = format!("{}({})", op, f.expr);
                 let new_recipe = Recipe::Unary(op.to_string(), Box::new(f.recipe.clone()));
                 local_res.push(Feature { expr: new_expr, recipe: new_recipe });
@@ -328,21 +255,16 @@ fn rust_fit_exhaustive(
         }).collect();
         next_gen_candidates.extend(unary_generated);
 
-        // 2. 二項演算子の生成
         if !binary_ops.is_empty() {
             let binary_ops_local = binary_ops.clone();
             let pool_local = all_promising_pool.clone();
-            
             let binary_generated: Vec<Feature> = current_level_pool.par_iter().flat_map_iter(move |f1| {
                 let ops = binary_ops_local.clone();
                 pool_local.iter().flat_map(move |f2| {
                     let mut local_res = Vec::new();
                     for op in &ops {
-                        // 交換法則のチェック
                         let is_commutative = ["+", "*", "add", "mul", "|-|"].contains(&op.as_str());
                         if is_commutative && f1.expr > f2.expr { continue; }
-                        
-                        // 恒等式のチェック (x-x, x/x)
                         let is_anti_identity = ["-", "/", "sub", "div", "|-|"].contains(&op.as_str());
                         if is_anti_identity && f1.expr == f2.expr { continue; }
 
@@ -361,30 +283,38 @@ fn rust_fit_exhaustive(
             next_gen_candidates.extend(binary_generated);
         }
 
-        // 重複排除
         let unique_candidates: Vec<Feature> = next_gen_candidates.into_iter()
             .filter(|f| seen_exprs.insert(f.expr.clone())) 
             .collect();
 
         if unique_candidates.is_empty() { break; }
 
-        // SIS スクリーニング (ここでのみデータを計算)
         let selected_features = perform_sis_lazy(&unique_candidates, &x_base, &y, n_sis_features, use_split_selection);
+        
+        println!("Level {}: Generated Unique={}, SIS Selected={}", level, unique_candidates.len(), selected_features.len());
         
         current_level_pool = selected_features.clone();
         all_promising_pool.extend(selected_features);
     }
 
-    // --- SO (全探索) ---
+    println!("Pool Size for Exhaustive Search: {}", all_promising_pool.len());
     all_promising_pool.sort_by(|a, b| a.expr.cmp(&b.expr));
 
+    // --- SO (Optimized Performance & Progress Logging) ---
     let mut best_global_rmse = f64::INFINITY;
     let mut best_global_model = (String::new(), Vec::new(), 0.0, Vec::new());
 
     let mut current_residual = y.clone();
     let mut final_model_pool: Vec<Feature> = Vec::new();
 
-    for _term_idx in 1..=n_term {
+    println!("\n***************** Starting SISSO Regressor (Rust) *****************");
+    let n_samples = y.len();
+    let y_centered: Array1<f64> = &y - y_mean;
+    let y_sum_sq = y_centered.dot(&y_centered);
+
+    for term_idx in 1..=n_term {
+        println!("\n===== Searching for {}-term models =====", term_idx);
+        
         let pool_exprs: HashSet<String> = final_model_pool.iter().map(|f| f.expr.clone()).collect();
         let candidates: Vec<Feature> = all_promising_pool.iter()
             .filter(|f| !pool_exprs.contains(&f.expr))
@@ -394,35 +324,107 @@ fn rust_fit_exhaustive(
         let top_k = perform_sis_lazy(&candidates, &x_base, &current_residual, n_sis_features, use_split_selection);
         final_model_pool.extend(top_k);
         
-        use itertools::Itertools;
+        // --- Gram Matrix Pre-calculation ---
+        let m_pool = final_model_pool.len();
+        let mut p_mat = DMatrix::zeros(n_samples, m_pool);
+        let mut pool_means = Vec::with_capacity(m_pool);
+        let mut pool_stds = Vec::with_capacity(m_pool);
+
+        for (j, f) in final_model_pool.iter().enumerate() {
+            let data = evaluate_recipe(&f.recipe, &x_base).unwrap();
+            let mean = data.mean().unwrap_or(0.0);
+            let std = data.std(0.0);
+            let safe_std = if std > 1e-9 { std } else { 1.0 };
+            
+            pool_means.push(mean);
+            pool_stds.push(safe_std);
+            
+            for i in 0..n_samples {
+                p_mat[(i, j)] = (data[i] - mean) / safe_std;
+            }
+        }
+
+        // Gram Matrix G = P^T * P and Vector V = P^T * y_centered
+        let g_mat = &p_mat.transpose() * &p_mat;
         
-        let best_in_term_opt = final_model_pool.iter()
-            .combinations(_term_idx)
-            .par_bridge()
-            .map(|combo| {
-                // 特徴量がデータを持たなくなったため、base_data を渡して OLS を解く
-                let (rmse, coeffs, intercept) = solve_ols_nalgebra(&combo, &x_base, &y);
-                (rmse, coeffs, intercept, combo)
+        let y_vec_centered = DVector::from_vec(y_centered.to_vec());
+        let pty_vec = &p_mat.transpose() * &y_vec_centered;
+
+        use itertools::Itertools;
+        let combinations: Vec<Vec<usize>> = (0..m_pool).combinations(term_idx).collect();
+        let total_combos = combinations.len();
+        
+        let report_step = (total_combos / 10).max(1);
+        let atomic_counter = std::sync::atomic::AtomicUsize::new(0);
+
+        let best_in_term_opt = combinations.par_iter()
+            .map(|combo_indices| {
+                let step = atomic_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                
+                // Extract sub-Gram matrix and sub-V
+                let mut g_sub = DMatrix::zeros(term_idx, term_idx);
+                let mut v_sub = DVector::zeros(term_idx);
+                
+                for r in 0..term_idx {
+                    v_sub[r] = pty_vec[combo_indices[r]];
+                    for c in 0..term_idx {
+                        g_sub[(r, c)] = g_mat[(combo_indices[r], combo_indices[c])];
+                    }
+                }
+
+                // Solve G_sub * w = V_sub
+                let res_w = if let Some(chol) = g_sub.clone().cholesky() {
+                    Some(chol.solve(&v_sub))
+                } else {
+                    g_sub.clone().svd(true, true).solve(&v_sub, 1e-9).ok()
+                };
+
+                let (rmse, coeffs_real, intercept) = match res_w {
+                    Some(w) => {
+                        // SSE = y_sum_sq - w^T * V_sub
+                        let sse = (y_sum_sq - w.dot(&v_sub)).max(0.0);
+                        let rmse = (sse / n_samples as f64).sqrt();
+                        
+                        let mut coeffs = Vec::with_capacity(term_idx);
+                        let mut icpt = y_mean;
+                        for i in 0..term_idx {
+                            let idx = combo_indices[i];
+                            let c = w[i] / pool_stds[idx];
+                            coeffs.push(c);
+                            icpt -= c * pool_means[idx];
+                        }
+                        (rmse, coeffs, icpt)
+                    },
+                    None => (f64::INFINITY, vec![0.0; term_idx], 0.0)
+                };
+                
+                if step % report_step == 0 {
+                    let r2 = 1.0 - (rmse * rmse) / y_var;
+                    println!("  Progress: {:>3}% ({}/{}), Current Best R2: {:.6}", 
+                             (step * 100) / total_combos, step, total_combos, r2);
+                }
+                
+                let combo_features: Vec<&Feature> = combo_indices.iter().map(|&i| &final_model_pool[i]).collect();
+                (rmse, coeffs_real, intercept, combo_features)
             })
             .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
 
         if let Some((rmse, coeffs, intercept, features)) = best_in_term_opt {
-            // 次のタームのために残差を更新
             let mut y_pred = Array1::from_elem(y.len(), intercept);
-            for (i, f) in features.iter().enumerate() {
-                if let Some(data) = evaluate_recipe(&f.recipe, &x_base) {
-                    y_pred = y_pred + &data * coeffs[i];
-                }
+            for i in 0..features.len() {
+                let data = evaluate_recipe(&features[i].recipe, &x_base).unwrap();
+                y_pred = y_pred + &data * coeffs[i];
             }
             current_residual = &y - &y_pred;
 
             let mut eq_parts = Vec::new();
             for (i, f) in features.iter().enumerate() {
-                let val: f64 = coeffs[i];
-                eq_parts.push(format!("{:.6} * {}", val, f.expr));
+                eq_parts.push(format!("{:.6} * {}", coeffs[i], f.expr));
             }
-            let intercept_val: f64 = intercept;
-            let eq_str = format!("{} + {:.6}", eq_parts.join(" + "), intercept_val);
+            let eq_str = format!("{} + {:.6}", eq_parts.join(" + "), intercept);
+
+            let r2 = 1.0 - (rmse * rmse) / y_var;
+            println!("Best {}-term model: RMSE={:.6}, R2={:.6}, Eq: {}", term_idx, rmse, r2, eq_str);
 
             if rmse < best_global_rmse {
                 best_global_rmse = rmse;

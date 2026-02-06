@@ -75,7 +75,7 @@ class MiniSisso(BaseEstimator, RegressorMixin):
                     for struct in feature_structures
                 ]
                 
-                print(f"\nBest Model Found (Rust):\n  RMSE: {self.rmse_:.6f}\n  Equation: {self.equation_}")
+                print(f"\nBest Model Found (Rust):\n  RMSE: {self.rmse_:.6f}\n  R2:   {self.r2_:.6f}\n  Equation: {self.equation_}")
                 return self
                 
             except Exception as e:
